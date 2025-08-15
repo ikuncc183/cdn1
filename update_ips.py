@@ -122,8 +122,10 @@ def get_existing_dns_records(line_code):
     """获取指定线路下，当前域名已有的 A 记录"""
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
     try:
-        # 核心修改：在查询时加入线路参数
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A", line=line_code)
+        # 核心修改：先创建请求对象，再为其设置线路属性
+        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
+        request.line = line_code
+        
         response = dns_client.list_record_sets_by_zone(request)
         
         print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
