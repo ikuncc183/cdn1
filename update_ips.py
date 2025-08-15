@@ -153,8 +153,9 @@ def create_dns_record_set(ip_list, line_code):
         
     print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
     try:
-        # 核心修改：创建记录时加入线路参数
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60, line=line_code)
+        # 核心修改：先创建 body 对象，再为其设置 line 属性
+        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
+        body.line = line_code
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
