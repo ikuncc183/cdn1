@@ -162,8 +162,8 @@ def create_dns_record_set(ip_list, line_code):
     print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
     try:
         # --- 核心修改点 ---
-        # 使用正确的请求体类 CreateRecordSetWithLineReq 来构建请求
-        body = CreateRecordSetWithLineReq(
+        # 使用正确的请求体类 CreateRecordSetWithLineRequestBody 来构建请求
+        body = CreateRecordSetWithLineRequestBody(
             name=DOMAIN_NAME + ".", 
             type="A", 
             records=ip_list, 
