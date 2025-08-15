@@ -19,16 +19,16 @@ HUAWEI_CLOUD_ZONE_NAME = os.environ.get('HUAWEI_CLOUD_ZONE_NAME')
 DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 MAX_IPS = os.environ.get('MAX_IPS')
 
-# --- API 地址已更新 ---
+# --- API 地址 ---
 IP_API_URL = 'https://www.wetest.vip/api/cf2dns/get_cloudflare_ip?key=o1zrmHAF&type=v4'
 
-# --- API Key 到华为云线路代码的映射 ---
-# 新增了 "default" 线路，它将使用 "ct" (电信) 的 IP
+# --- API Key 到华为云线路代码的映射 (已修复为大写) ---
+# 新增了 "default" 线路，它将使用 "CT" (电信) 的 IP
 ISP_LINE_MAP = {
     "default": "default", # 默认线路
-    "cm": "chinamobile",  # 移动
-    "cu": "chinaunicom",  # 联通
-    "ct": "chinatelecom"  # 电信
+    "CM": "chinamobile",  # 移动
+    "CU": "chinaunicom",  # 联通
+    "CT": "chinatelecom"  # 电信
 }
 
 # --- 全局变量 ---
@@ -85,23 +85,21 @@ def get_ips_from_api():
         response.raise_for_status()
         data = response.json()
         
-        # --- 新增：打印 API 返回的原始数据以供诊断 ---
         print("--- API 原始返回数据 ---")
         print(json.dumps(data, indent=2))
         print("-----------------------")
         
         if not data.get("status"):
-            print("错误: API 返回状态为 false。")
+            print(f"错误: API 返回状态为 false, 消息: {data.get('msg')}")
             return None
 
         info = data.get("info", {})
         if not info:
             print("警告: API 返回的数据中 'info' 字段为空或不存在。")
-            return {} # 返回空字典而不是 None
+            return {}
 
         parsed_ips = {}
         for isp_key, ip_objects in info.items():
-            # 确保 ip_objects 是一个列表
             if isinstance(ip_objects, list):
                 parsed_ips[isp_key] = [obj["address"] for obj in ip_objects if "address" in obj]
             else:
@@ -166,7 +164,7 @@ def main():
         return
 
     all_ips_by_isp = get_ips_from_api()
-    if all_ips_by_isp is None: # 严格检查 None，允许空字典通过
+    if all_ips_by_isp is None:
         print("未能获取优选 IP 数据，本次任务终止。")
         return
 
@@ -174,7 +172,7 @@ def main():
         print(f"\n--- 正在处理线路: {api_key} ({line_code}) ---")
         
         # 特殊处理默认线路，让它使用电信的 IP
-        source_key = "ct" if api_key == "default" else api_key
+        source_key = "CT" if api_key == "default" else api_key
         ip_list = all_ips_by_isp.get(source_key, [])
         
         if not ip_list:
