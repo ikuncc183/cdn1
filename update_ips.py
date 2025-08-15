@@ -30,9 +30,8 @@ IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
 
 # --- 定义运营商线路 ---
 # 键是用户友好的名称，值是华为云 API 使用的线路代码
-# 核心修改点：将线路代码更新为华为云常用的拼音格式
 ISP_LINES = {
-    "默认": "default",
+    "默认": "default", # "default" 是一个特殊标识，用于区分处理逻辑
     "移动": "Yidong",
     "电信": "Dianxin",
     "联通": "Liantong"
@@ -123,25 +122,39 @@ def get_preferred_ips():
                 return []
     return []
 
+# MODIFIED: 修改此函数，使其可以处理默认线路和带线路的查询
 def get_existing_dns_records(line_code):
     """获取指定线路下，当前域名已有的 A 记录"""
-    print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
+    friendly_name = "默认 (default)" if line_code == "default" else line_code
+    print(f"正在查询域名 {DOMAIN_NAME} (线路: {friendly_name}) 的现有 DNS A 记录...")
     try:
-        # 先创建请求对象，再单独设置 line 参数，以提高兼容性
         request = ListRecordSetsByZoneRequest(
-            zone_id=zone_id,
+            zone_id=zone_id
         )
         request.name = DOMAIN_NAME + "."
         request.type = "A"
-        request.line = line_code
         
-        response = dns_client.list_record_sets_by_zone(request)
+        # 关键修改：只有当 line_code 不是 "default" 时，才设置 line 参数
+        if line_code != "default":
+            request.line = line_code
         
+        # 如果是查询默认线路，需要使用 list_record_sets_by_zone
+        # 如果是查询带线路的，也同样可以使用这个，但为了精确，分开调用
+        if line_code == "default":
+             response = dns_client.list_record_sets(request)
+        else:
+             response = dns_client.list_record_sets_by_zone(request)
+
         print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
         return response.recordsets
     except exceptions.ClientRequestException as e:
+        # 针对默认线路不存在时API返回404的情况，这是正常行为，不应视为错误
+        if line_code == "default" and hasattr(e, 'status_code') and e.status_code == 404:
+            print("查询到 0 条已存在的 A 记录。")
+            return []
         print(f"错误: 查询 DNS 记录时发生错误: {e}")
         return []
+
 
 def delete_dns_record(record_id):
     """删除指定的 DNS 记录"""
@@ -154,8 +167,38 @@ def delete_dns_record(record_id):
         print(f"错误: 删除记录 {record_id} 时失败: {e}")
         return False
 
-def create_dns_record_set(ip_list, line_code):
-    """将所有 IP 创建到指定线路的一个解析记录集中"""
+# NEW FUNCTION: 新增一个专门用于创建默认记录集的函数
+def create_default_record_set(ip_list):
+    """将所有 IP 创建到'全网默认'的一个解析记录集中"""
+    if not ip_list:
+        print("IP 列表为空，无需创建记录。")
+        return False
+        
+    print(f"准备将 {len(ip_list)} 个 IP 创建到 '全网默认' 的一个解析记录集中...")
+    try:
+        # 使用不带 line 的请求体 CreateRecordSetRequestBody
+        body = CreateRecordSetRequestBody(
+            name=DOMAIN_NAME + ".", 
+            type="A", 
+            records=ip_list, 
+            ttl=60
+        )
+        
+        # 使用不带 line 的请求接口 CreateRecordSetRequest
+        request = CreateRecordSetRequest(zone_id=zone_id, body=body)
+        dns_client.create_record_set(request)
+
+        print(f"成功为 {DOMAIN_NAME} (线路: 默认) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
+        return True
+    except exceptions.ClientRequestException as e:
+        print(f"错误: 创建'全网默认'解析记录集时失败: {e}")
+        if hasattr(e, 'error_msg'):
+            print(f"API 返回信息: {e.error_msg}")
+        return False
+
+
+def create_lined_record_set(ip_list, line_code):
+    """将所有 IP 创建到指定线路的一个解析记录集中（原函数重命名）"""
     if not ip_list:
         print("IP 列表为空，无需创建记录。")
         return False
@@ -208,15 +251,17 @@ def main():
         existing_records = get_existing_dns_records(line_code)
         if existing_records:
             print(f"--- 开始删除线路 '{line_name}' 的旧 DNS 记录 ---")
-            # 华为云通常一个域名一个线路只有一个 record set，但为了保险起见还是循环删除
             for record in existing_records:
                 delete_dns_record(record.id)
         else:
             print("没有需要删除的旧记录。")
 
-        # 2. 在该线路下创建新的记录集
+        # 2. MODIFIED: 在该线路下创建新的记录集, 根据 line_code 调用不同函数
         print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
-        create_dns_record_set(new_ips, line_code)
+        if line_code == "default":
+            create_default_record_set(new_ips)
+        else:
+            create_lined_record_set(new_ips, line_code)
     
     print("\n--- 所有线路更新完成 ---")
 
