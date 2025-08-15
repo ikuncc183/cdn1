@@ -1,4 +1,4 @@
-# update_ips.py (Final Version)
+# update_ips.py (Final Version - v3)
 import os
 import requests
 import json
@@ -107,22 +107,23 @@ def get_existing_dns_records(line_code):
     friendly_name = "默认 (default)" if line_code == "default" else line_code
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {friendly_name}) 的现有 DNS A 记录...")
     try:
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id)
-        request.name = DOMAIN_NAME + "."
-        request.type = "A"
-        
         if line_code != "default":
+            request = ListRecordSetsByZoneRequest(zone_id=zone_id)
+            request.name = DOMAIN_NAME + "."
+            request.type = "A"
             request.line = line_code
             response = dns_client.list_record_sets_by_zone(request)
         else:
-            # 查询默认线路时不能带 line 参数
-            request_no_line = ListRecordSetsRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
+            # 关键修正: ListRecordSetsRequest 不接受初始化参数, 需在创建后赋值
+            request_no_line = ListRecordSetsRequest()
+            request_no_line.zone_id = zone_id
+            request_no_line.name = DOMAIN_NAME + "."
+            request_no_line.type = "A"
             response = dns_client.list_record_sets(request_no_line)
 
         print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
         return response.recordsets
     except exceptions.ClientRequestException as e:
-        # API 对于不存在的记录会返回 404，这是正常情况
         if hasattr(e, 'status_code') and e.status_code == 404:
             print("查询到 0 条已存在的 A 记录。")
             return []
@@ -150,21 +151,14 @@ def create_record_set(ip_list, line_code):
         if hasattr(e, 'error_msg'): print(f"API 返回信息: {e.error_msg}")
         return False
 
-# NEW: 统一的更新函数
 def update_record_set(record_id, ip_list, line_code):
     """根据线路更新已有的解析记录集 (默认或带线路)"""
     try:
-        if line_code == "default":
-            print(f"准备更新 '全网默认' 的解析记录 (ID: {record_id})...")
-            body = UpdateRecordSetReq(records=ip_list, ttl=60)
-            request = UpdateRecordSetRequest(zone_id=zone_id, recordset_id=record_id, body=body)
-            dns_client.update_record_set(request)
-        else:
-            # 注意：更新带线路的记录集也使用不带 line 的 UpdateRecordSetReq
-            print(f"准备更新线路 '{line_code}' 的解析记录 (ID: {record_id})...")
-            body = UpdateRecordSetReq(records=ip_list, ttl=60)
-            request = UpdateRecordSetRequest(zone_id=zone_id, recordset_id=record_id, body=body)
-            dns_client.update_record_set(request)
+        # 更新操作对于默认和带线路的记录是统一的
+        print(f"准备更新线路 '{line_code}' 的解析记录 (ID: {record_id})...")
+        body = UpdateRecordSetReq(records=ip_list, ttl=60)
+        request = UpdateRecordSetRequest(zone_id=zone_id, recordset_id=record_id, body=body)
+        dns_client.update_record_set(request)
 
         print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 更新了包含 {len(ip_list)} 个 IP 的 A 记录。")
         return True
@@ -190,20 +184,16 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    # REFACTORED: 采用 Update or Create (Upsert) 逻辑
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
         existing_records = get_existing_dns_records(line_code)
         
         if existing_records:
-            # 记录已存在，执行更新
-            # 通常一个域名/线路组合只有一个记录集，我们只更新第一个找到的
             record_to_update = existing_records[0]
             print(f"记录已存在 (ID: {record_to_update.id})，准备执行更新操作。")
             update_record_set(record_to_update.id, new_ips, line_code)
         else:
-            # 记录不存在，执行创建
             print("记录不存在，准备执行创建操作。")
             create_record_set(new_ips, line_code)
     
