@@ -29,10 +29,9 @@ MAX_IPS = os.environ.get('MAX_IPS')
 IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
 
 # --- 定义运营商线路 ---
-# 键是用户友好的名称，值是华为云 API 使用的线路代码
-# 核心修改点：将线路代码更新为华为云常用的拼音格式
+# 重新加入“全网默认”线路，并保留正常工作的三网线路
 ISP_LINES = {
-    "默认": "default",
+    "全网默认": "default",
     "移动": "Yidong",
     "电信": "Dianxin",
     "联通": "Liantong"
@@ -127,13 +126,13 @@ def get_existing_dns_records(line_code):
     """获取指定线路下，当前域名已有的 A 记录"""
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
     try:
-        # 先创建请求对象，再单独设置 line 参数，以提高兼容性
+        # 华为云的 list 接口可以直接使用 'default' 作为 line code 查询
         request = ListRecordSetsByZoneRequest(
             zone_id=zone_id,
+            name=DOMAIN_NAME + ".",
+            type="A",
+            line=line_code
         )
-        request.name = DOMAIN_NAME + "."
-        request.type = "A"
-        request.line = line_code
         
         response = dns_client.list_record_sets_by_zone(request)
         
@@ -159,29 +158,55 @@ def create_dns_record_set(ip_list, line_code):
     if not ip_list:
         print("IP 列表为空，无需创建记录。")
         return False
-        
-    print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
-    try:
-        # 使用正确的请求体类 CreateRecordSetWithLineRequestBody 来构建请求
-        body = CreateRecordSetWithLineRequestBody(
-            name=DOMAIN_NAME + ".", 
-            type="A", 
-            records=ip_list, 
-            ttl=60,
-            line=line_code
-        )
-        
-        request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
-        dns_client.create_record_set_with_line(request)
+    
+    # --- 核心修改点 ---
+    # 根据线路代码选择不同的 API 调用方式
+    # “全网默认”线路需要使用不带 line 参数的标准创建接口
+    if line_code == "default":
+        print(f"准备为 '全网默认' 线路创建一个解析记录集中...")
+        try:
+            # 构造不含 line 参数的标准请求体
+            recordset_body = CreateRecordSet(
+                name=DOMAIN_NAME + ".", 
+                type="A", 
+                records=ip_list, 
+                ttl=60
+            )
+            body = CreateRecordSetRequestBody(recordset=recordset_body)
+            request = CreateRecordSetRequest(zone_id=zone_id, body=body)
+            
+            # 调用标准的创建方法
+            dns_client.create_record_set(request)
 
-        print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
-        return True
-    except exceptions.ClientRequestException as e:
-        print(f"错误: 创建解析记录集时失败: {e}")
-        # 尝试打印更详细的错误信息
-        if hasattr(e, 'error_msg'):
-            print(f"API 返回信息: {e.error_msg}")
-        return False
+            print(f"成功为 {DOMAIN_NAME} (全网默认) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
+            return True
+        except exceptions.ClientRequestException as e:
+            print(f"错误: 创建默认解析记录集时失败: {e}")
+            if hasattr(e, 'error_msg'):
+                print(f"API 返回信息: {e.error_msg}")
+            return False
+    else:
+        # 对于运营商线路，使用带 line 参数的特定接口
+        print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
+        try:
+            body = CreateRecordSetWithLineRequestBody(
+                name=DOMAIN_NAME + ".", 
+                type="A", 
+                records=ip_list, 
+                ttl=60,
+                line=line_code
+            )
+            
+            request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
+            dns_client.create_record_set_with_line(request)
+
+            print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
+            return True
+        except exceptions.ClientRequestException as e:
+            print(f"错误: 创建解析记录集时失败: {e}")
+            if hasattr(e, 'error_msg'):
+                print(f"API 返回信息: {e.error_msg}")
+            return False
 
 def main():
     """主执行函数"""
