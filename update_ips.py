@@ -1,4 +1,4 @@
-# update_ips.py (Final Version - v4 with configurable TTL)
+# update_ips.py (Final Version - v5 with hardcoded TTL)
 import os
 import requests
 import json
@@ -18,8 +18,11 @@ HUAWEI_CLOUD_PROJECT_ID = os.environ.get('HUAWEI_CLOUD_PROJECT_ID')
 HUAWEI_CLOUD_ZONE_NAME = os.environ.get('HUAWEI_CLOUD_ZONE_NAME')
 DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 MAX_IPS = os.environ.get('MAX_IPS')
-# (可选) DNS 解析记录的 TTL 值
-DNS_TTL = os.environ.get('DNS_TTL')
+
+# --- 在此处直接修改 TTL 值 ---
+# TTL (Time To Live) 是 DNS 记录在缓存中的存活时间，单位为秒。
+# 常用值: 60 (1分钟), 300 (5分钟), 600 (10分钟), 3600 (1小时)
+HARDCODED_TTL = 300
 
 # --- 优选 IP 的 API 地址 ---
 IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
@@ -186,18 +189,10 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    # --- TTL 配置处理 ---
-    try:
-        # 尝试将 TTL 转换为整数，华为云 DNS TTL 范围为 1-2147483647
-        ttl_value = int(DNS_TTL)
-        if not (1 <= ttl_value <= 2147483647):
-            print(f"警告: 配置的 TTL 值 '{DNS_TTL}' 超出有效范围 (1-2147483647)，将使用默认值 60。")
-            ttl_value = 60
-        else:
-            print(f"将使用配置的 TTL 值: {ttl_value}")
-    except (ValueError, TypeError):
-        print("未配置或配置的 TTL 值无效，将使用默认值 60。")
-        ttl_value = 60
+    # 直接使用在脚本顶部定义的 TTL 值
+    ttl_value = HARDCODED_TTL
+    print(f"将使用脚本中设置的 TTL 值: {ttl_value}")
+
 
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
