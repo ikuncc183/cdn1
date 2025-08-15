@@ -79,16 +79,30 @@ def get_zone_id():
 def get_ips_from_new_api():
     """从新的 JSON API 获取按运营商分类的 IP 字典"""
     print(f"正在从 {IP_API_URL} 获取优选 IP...")
-    try:
-        response = requests.get(IP_API_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        print("成功从新 API 获取并解析了 JSON 数据。")
-        return data
-    except requests.RequestException as e:
-        print(f"错误: 请求优选 IP 时发生错误: {e}")
-    except json.JSONDecodeError:
-        print("错误: 解析 API 返回的 JSON 数据失败。")
+    
+    retry_count = 3
+    retry_delay = 5 # 每次重试前等待5秒
+
+    for attempt in range(retry_count):
+        try:
+            # 增加 User-Agent 请求头，有时可以解决 403 Forbidden 错误
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
+            response = requests.get(IP_API_URL, timeout=10, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            print("成功从新 API 获取并解析了 JSON 数据。")
+            return data
+        except requests.RequestException as e:
+            print(f"错误: 请求优选 IP 时发生错误 (尝试 {attempt + 1}/{retry_count}): {e}")
+            if attempt < retry_count - 1:
+                print(f"将在 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print("已达到最大重试次数，获取 IP 失败。")
+        except json.JSONDecodeError:
+            print("错误: 解析 API 返回的 JSON 数据失败。")
+            return None # JSON 解析失败通常是永久性问题，无需重试
+            
     return None
 
 def get_existing_records(line_code, record_type):
