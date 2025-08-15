@@ -28,15 +28,6 @@ MAX_IPS = os.environ.get('MAX_IPS')
 # --- 优选 IP 的 API 地址 ---
 IP_API_URL = 'https://raw.githubusercontent.com/hubbylei/bestcf/main/bestcf.txt'
 
-# --- 新增：定义运营商线路 ---
-# 键是用户友好的名称，值是华为云 API 使用的线路代码
-ISP_LINES = {
-    "默认": "default",
-    "移动": "chinamobile",
-    "电信": "chinatelecom",
-    "联通": "chinaunicom"
-}
-
 # --- 全局变量 ---
 dns_client = None
 zone_id = None
@@ -118,14 +109,12 @@ def get_preferred_ips():
                 return []
     return []
 
-def get_existing_dns_records(line_code):
-    """获取指定线路下，当前域名已有的 A 记录"""
-    print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
+def get_existing_dns_records():
+    """获取当前域名已有的 A 记录 (华为云版)"""
+    print(f"正在查询域名 {DOMAIN_NAME} 的现有 DNS A 记录...")
     try:
-        # 核心修改：先创建请求对象，再为其设置线路属性
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
-        request.line = line_code
-        
+        # 只查询默认线路的记录
+        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A", line="default")
         response = dns_client.list_record_sets_by_zone(request)
         
         print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
@@ -135,7 +124,7 @@ def get_existing_dns_records(line_code):
         return []
 
 def delete_dns_record(record_id):
-    """删除指定的 DNS 记录"""
+    """删除指定的 DNS 记录 (华为云版)"""
     try:
         request = DeleteRecordSetRequest(zone_id=zone_id, recordset_id=record_id)
         dns_client.delete_record_set(request)
@@ -145,21 +134,20 @@ def delete_dns_record(record_id):
         print(f"错误: 删除记录 {record_id} 时失败: {e}")
         return False
 
-def create_dns_record_set(ip_list, line_code):
-    """将所有 IP 创建到指定线路的一个解析记录集中"""
+def create_dns_record_set(ip_list):
+    """将所有 IP 创建到一个解析记录集中 (华为云版)"""
     if not ip_list:
         print("IP 列表为空，无需创建记录。")
         return False
         
-    print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
+    print(f"准备将 {len(ip_list)} 个 IP 创建到一个解析记录集中...")
     try:
-        # 核心修改：先创建 body 对象，再为其设置 line 属性
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
-        body.line = line_code
+        # 只为默认线路创建记录
+        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60, line="default")
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
-        print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
+        print(f"成功为 {DOMAIN_NAME} 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
         return True
     except exceptions.ClientRequestException as e:
         print(f"错误: 创建解析记录集时失败: {e}")
@@ -182,24 +170,19 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    # --- 核心修改：遍历所有定义的运营商线路 ---
-    for line_name, line_code in ISP_LINES.items():
-        print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
+    existing_records = get_existing_dns_records()
+    if existing_records:
+        print("\n--- 开始删除旧的 DNS 记录 ---")
+        for record in existing_records:
+            delete_dns_record(record.id)
+    else:
+        print("没有需要删除的旧记录。")
 
-        # 1. 获取并删除该线路下的旧记录
-        existing_records = get_existing_dns_records(line_code)
-        if existing_records:
-            print(f"--- 开始删除线路 '{line_name}' 的旧 DNS 记录 ---")
-            for record in existing_records:
-                delete_dns_record(record.id)
-        else:
-            print("没有需要删除的旧记录。")
-
-        # 2. 在该线路下创建新的记录集
-        print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
-        create_dns_record_set(new_ips, line_code)
-    
-    print("\n--- 所有线路更新完成 ---")
+    print("\n--- 开始创建新的 DNS 记录 ---")
+    if create_dns_record_set(new_ips):
+        print(f"\n--- 更新完成 ---")
+    else:
+        print(f"\n--- 更新失败 ---")
 
 
 if __name__ == '__main__':
