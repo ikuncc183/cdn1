@@ -32,7 +32,6 @@ IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
 # 键是用户友好的名称，值是华为云 API 使用的线路代码
 # 核心修改点：将线路代码更新为华为云常用的拼音格式
 ISP_LINES = {
-    "默认": "default",
     "移动": "Yidong",
     "电信": "Dianxin",
     "联通": "Liantong"
