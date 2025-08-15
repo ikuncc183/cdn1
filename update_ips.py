@@ -16,6 +16,8 @@ from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
 HUAWEI_CLOUD_AK = os.environ.get('HUAWEI_CLOUD_AK')
 # 华为云秘密访问密钥 (Secret Access Key)
 HUAWEI_CLOUD_SK = os.environ.get('HUAWEI_CLOUD_SK')
+# 华为云 Project ID
+HUAWEI_CLOUD_PROJECT_ID = os.environ.get('HUAWEI_CLOUD_PROJECT_ID')
 # 华为云托管的公网域名 (Zone Name)
 HUAWEI_CLOUD_ZONE_NAME = os.environ.get('HUAWEI_CLOUD_ZONE_NAME')
 # 需要更新解析的完整域名
@@ -33,11 +35,14 @@ zone_id = None
 def init_huawei_dns_client():
     """初始化华为云 DNS 客户端"""
     global dns_client
-    if not all([HUAWEI_CLOUD_AK, HUAWEI_CLOUD_SK]):
-        print("错误: 缺少华为云 AK 或 SK，请检查 GitHub Secrets 配置。")
+    if not all([HUAWEI_CLOUD_AK, HUAWEI_CLOUD_SK, HUAWEI_CLOUD_PROJECT_ID]):
+        print("错误: 缺少华为云 AK, SK 或 Project ID，请检查 GitHub Secrets 配置。")
         return False
     
-    credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK, sk=HUAWEI_CLOUD_SK)
+    # 将 Project ID 加入到认证信息中
+    credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK,
+                                   sk=HUAWEI_CLOUD_SK,
+                                   project_id=HUAWEI_CLOUD_PROJECT_ID)
     
     # 注意：华为云 DNS 服务的 Region 通常是固定的，例如 "cn-east-3" 或 "ap-southeast-1"
     # 这里我们使用 DnsRegion.value_of("cn-east-3") 作为示例，它通常适用于国际版
@@ -77,7 +82,6 @@ def get_zone_id():
 def get_preferred_ips():
     """从 API 获取优选 IP 列表"""
     print(f"正在从 {IP_API_URL} 获取优选 IP...")
-    # (此函数与之前版本相同，包含重试和数量控制逻辑)
     retry_count = 3
     retry_delay = 10
     for attempt in range(retry_count):
