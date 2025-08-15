@@ -126,13 +126,12 @@ def get_existing_dns_records(line_code):
     """获取指定线路下，当前域名已有的 A 记录"""
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
     try:
-        # 华为云的 list 接口可以直接使用 'default' 作为 line code 查询
-        request = ListRecordSetsByZoneRequest(
-            zone_id=zone_id,
-            name=DOMAIN_NAME + ".",
-            type="A",
-            line=line_code
-        )
+        # --- 核心修改点 ---
+        # 恢复兼容性写法：先创建请求对象，再单独设置参数
+        request = ListRecordSetsByZoneRequest(zone_id=zone_id)
+        request.name = DOMAIN_NAME + "."
+        request.type = "A"
+        request.line = line_code
         
         response = dns_client.list_record_sets_by_zone(request)
         
@@ -159,7 +158,6 @@ def create_dns_record_set(ip_list, line_code):
         print("IP 列表为空，无需创建记录。")
         return False
     
-    # --- 核心修改点 ---
     # 根据线路代码选择不同的 API 调用方式
     # “全网默认”线路需要使用不带 line 参数的标准创建接口
     if line_code == "default":
