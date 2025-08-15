@@ -28,7 +28,7 @@ MAX_IPS = os.environ.get('MAX_IPS')
 # --- 优选 IP 的 API 地址 ---
 IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
 
-# --- 新增：定义运营商线路 ---
+# --- 定义运营商线路 ---
 # 键是用户友好的名称，值是华为云 API 使用的线路代码
 ISP_LINES = {
     "默认": "default",
@@ -49,8 +49,8 @@ def init_huawei_dns_client():
         return False
     
     credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK,
-                                   sk=HUAWEI_CLOUD_SK,
-                                   project_id=HUAWEI_CLOUD_PROJECT_ID)
+                                     sk=HUAWEI_CLOUD_SK,
+                                     project_id=HUAWEI_CLOUD_PROJECT_ID)
     
     try:
         dns_client = DnsClient.new_builder() \
@@ -75,6 +75,7 @@ def get_zone_id():
         request = ListPublicZonesRequest()
         response = dns_client.list_public_zones(request)
         for z in response.zones:
+            # 华为云的 zone name 会自带一个点
             if z.name == HUAWEI_CLOUD_ZONE_NAME + ".":
                 zone_id = z.id
                 print(f"成功找到 Zone ID: {zone_id}")
@@ -95,6 +96,7 @@ def get_preferred_ips():
             response = requests.get(IP_API_URL, timeout=10)
             response.raise_for_status()
             lines = response.text.strip().split('\n')
+            # 过滤掉注释和空行
             valid_ips = [line.split('#')[0].strip() for line in lines if line.strip()]
 
             if not valid_ips:
@@ -113,8 +115,10 @@ def get_preferred_ips():
         except requests.RequestException as e:
             print(f"错误: 请求优选 IP 时发生错误: {e}")
             if attempt < retry_count - 1:
+                print(f"将在 {retry_delay} 秒后重试...")
                 time.sleep(retry_delay)
             else:
+                print("已达到最大重试次数，获取 IP 失败。")
                 return []
     return []
 
@@ -122,9 +126,14 @@ def get_existing_dns_records(line_code):
     """获取指定线路下，当前域名已有的 A 记录"""
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
     try:
-        # 核心修改：先创建请求对象，再为其设置线路属性
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
-        request.line = line_code
+        # --- 核心修改点 1 ---
+        # 将 line 参数直接在初始化时传入
+        request = ListRecordSetsByZoneRequest(
+            zone_id=zone_id, 
+            name=DOMAIN_NAME + ".", 
+            type="A",
+            line=line_code
+        )
         
         response = dns_client.list_record_sets_by_zone(request)
         
@@ -153,9 +162,15 @@ def create_dns_record_set(ip_list, line_code):
         
     print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
     try:
-        # 核心修改：先创建 body 对象，再为其设置 line 属性
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
-        body.line = line_code
+        # --- 核心修改点 2 ---
+        # 将 line 参数直接在初始化 body 时传入
+        body = CreateRecordSetRequestBody(
+            name=DOMAIN_NAME + ".", 
+            type="A", 
+            records=ip_list, 
+            ttl=60,
+            line=line_code
+        )
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
@@ -182,7 +197,7 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    # --- 核心修改：遍历所有定义的运营商线路 ---
+    # 遍历所有定义的运营商线路
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
@@ -190,6 +205,7 @@ def main():
         existing_records = get_existing_dns_records(line_code)
         if existing_records:
             print(f"--- 开始删除线路 '{line_name}' 的旧 DNS 记录 ---")
+            # 华为云通常一个域名一个线路只有一个 record set，但为了保险起见还是循环删除
             for record in existing_records:
                 delete_dns_record(record.id)
         else:
