@@ -1,4 +1,4 @@
-# update_ips.py (Final Version - v3)
+# update_ips.py (Final Version - v4 with configurable TTL)
 import os
 import requests
 import json
@@ -18,6 +18,8 @@ HUAWEI_CLOUD_PROJECT_ID = os.environ.get('HUAWEI_CLOUD_PROJECT_ID')
 HUAWEI_CLOUD_ZONE_NAME = os.environ.get('HUAWEI_CLOUD_ZONE_NAME')
 DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 MAX_IPS = os.environ.get('MAX_IPS')
+# (可选) DNS 解析记录的 TTL 值
+DNS_TTL = os.environ.get('DNS_TTL')
 
 # --- 优选 IP 的 API 地址 ---
 IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
@@ -130,17 +132,17 @@ def get_existing_dns_records(line_code):
         print(f"错误: 查询 DNS 记录时发生错误: {e}")
         return []
 
-def create_record_set(ip_list, line_code):
+def create_record_set(ip_list, line_code, ttl):
     """根据线路创建新的解析记录集 (默认或带线路)"""
     try:
         if line_code == "default":
-            print(f"准备为 '全网默认' 创建一个新的解析记录集...")
-            body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
+            print(f"准备为 '全网默认' 创建一个新的解析记录集 (TTL: {ttl})...")
+            body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=ttl)
             request = CreateRecordSetRequest(zone_id=zone_id, body=body)
             dns_client.create_record_set(request)
         else:
-            print(f"准备为线路 '{line_code}' 创建一个新的解析记录集...")
-            body = CreateRecordSetWithLineRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60, line=line_code)
+            print(f"准备为线路 '{line_code}' 创建一个新的解析记录集 (TTL: {ttl})...")
+            body = CreateRecordSetWithLineRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=ttl, line=line_code)
             request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
             dns_client.create_record_set_with_line(request)
         
@@ -151,12 +153,12 @@ def create_record_set(ip_list, line_code):
         if hasattr(e, 'error_msg'): print(f"API 返回信息: {e.error_msg}")
         return False
 
-def update_record_set(record_id, ip_list, line_code):
+def update_record_set(record_id, ip_list, line_code, ttl):
     """根据线路更新已有的解析记录集 (默认或带线路)"""
     try:
         # 更新操作对于默认和带线路的记录是统一的
-        print(f"准备更新线路 '{line_code}' 的解析记录 (ID: {record_id})...")
-        body = UpdateRecordSetReq(records=ip_list, ttl=60)
+        print(f"准备更新线路 '{line_code}' 的解析记录 (ID: {record_id}, TTL: {ttl})...")
+        body = UpdateRecordSetReq(records=ip_list, ttl=ttl)
         request = UpdateRecordSetRequest(zone_id=zone_id, recordset_id=record_id, body=body)
         dns_client.update_record_set(request)
 
@@ -184,6 +186,19 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
+    # --- TTL 配置处理 ---
+    try:
+        # 尝试将 TTL 转换为整数，华为云 DNS TTL 范围为 1-2147483647
+        ttl_value = int(DNS_TTL)
+        if not (1 <= ttl_value <= 2147483647):
+            print(f"警告: 配置的 TTL 值 '{DNS_TTL}' 超出有效范围 (1-2147483647)，将使用默认值 60。")
+            ttl_value = 60
+        else:
+            print(f"将使用配置的 TTL 值: {ttl_value}")
+    except (ValueError, TypeError):
+        print("未配置或配置的 TTL 值无效，将使用默认值 60。")
+        ttl_value = 60
+
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
@@ -192,10 +207,10 @@ def main():
         if existing_records:
             record_to_update = existing_records[0]
             print(f"记录已存在 (ID: {record_to_update.id})，准备执行更新操作。")
-            update_record_set(record_to_update.id, new_ips, line_code)
+            update_record_set(record_to_update.id, new_ips, line_code, ttl_value)
         else:
             print("记录不存在，准备执行创建操作。")
-            create_record_set(new_ips, line_code)
+            create_record_set(new_ips, line_code, ttl_value)
     
     print("\n--- 所有线路更新完成 ---")
 
