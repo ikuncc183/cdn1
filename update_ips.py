@@ -20,7 +20,7 @@ DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 MAX_IPS = os.environ.get('MAX_IPS')
 
 # --- API 地址已更新 ---
-IP_API_URL = 'https://www.wetest.vip/api/cf2dns/get_cloudflare_ip?key=o1zrW4AF&type=v4'
+IP_API_URL = 'https://www.wetest.vip/api/cf2dns/get_cloudflare_ip?key=o1zrmHAF&type=v4'
 
 # --- API Key 到华为云线路代码的映射 ---
 # 新增了 "default" 线路，它将使用 "ct" (电信) 的 IP
