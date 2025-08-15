@@ -39,13 +39,10 @@ def init_huawei_dns_client():
         print("错误: 缺少华为云 AK, SK 或 Project ID，请检查 GitHub Secrets 配置。")
         return False
     
-    # 将 Project ID 加入到认证信息中
     credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK,
                                    sk=HUAWEI_CLOUD_SK,
                                    project_id=HUAWEI_CLOUD_PROJECT_ID)
     
-    # 注意：华为云 DNS 服务的 Region 通常是固定的，例如 "cn-east-3" 或 "ap-southeast-1"
-    # 这里我们使用 DnsRegion.value_of("cn-east-3") 作为示例，它通常适用于国际版
     try:
         dns_client = DnsClient.new_builder() \
             .with_credentials(credentials) \
@@ -69,7 +66,7 @@ def get_zone_id():
         request = ListPublicZonesRequest()
         response = dns_client.list_public_zones(request)
         for z in response.zones:
-            if z.name == HUAWEI_CLOUD_ZONE_NAME + ".": # API 返回的 name 会带一个点
+            if z.name == HUAWEI_CLOUD_ZONE_NAME + ".":
                 zone_id = z.id
                 print(f"成功找到 Zone ID: {zone_id}")
                 return True
@@ -113,13 +110,21 @@ def get_preferred_ips():
     return []
 
 def get_existing_dns_records():
-    """获取当前域名已有的 A 记录 (华为云版)"""
+    """获取当前域名已有的 A 记录 (华为云版) - 已修复"""
     print(f"正在查询域名 {DOMAIN_NAME} 的现有 DNS A 记录...")
     try:
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
+        # 修改：不再按名称和类型精确查找，而是查找Zone下的所有记录，然后在本地过滤
+        request = ListRecordSetsByZoneRequest(zone_id=zone_id)
         response = dns_client.list_record_sets_by_zone(request)
-        print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
-        return response.recordsets
+        
+        # 在本地进行过滤，确保找到所有匹配的 A 记录
+        matching_records = []
+        for record in response.recordsets:
+            if record.name == DOMAIN_NAME + "." and record.type == "A":
+                matching_records.append(record)
+
+        print(f"查询到 {len(matching_records)} 条已存在的 A 记录。")
+        return matching_records
     except exceptions.ClientRequestException as e:
         print(f"错误: 查询 DNS 记录时发生错误: {e}")
         return []
