@@ -1,4 +1,4 @@
-# update_ips.py
+# update_ips.py (Final Version)
 import os
 import requests
 import json
@@ -12,26 +12,19 @@ from huaweicloudsdkdns.v2 import *
 from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
 
 # --- 从 GitHub Secrets 读取配置 ---
-# 华为云访问密钥 ID (Access Key ID)
 HUAWEI_CLOUD_AK = os.environ.get('HUAWEI_CLOUD_AK')
-# 华为云秘密访问密钥 (Secret Access Key)
 HUAWEI_CLOUD_SK = os.environ.get('HUAWEI_CLOUD_SK')
-# 华为云 Project ID
 HUAWEI_CLOUD_PROJECT_ID = os.environ.get('HUAWEI_CLOUD_PROJECT_ID')
-# 华为云托管的公网域名 (Zone Name)
 HUAWEI_CLOUD_ZONE_NAME = os.environ.get('HUAWEI_CLOUD_ZONE_NAME')
-# 需要更新解析的完整域名
 DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
-# (可选) 需要解析的IP数量
 MAX_IPS = os.environ.get('MAX_IPS')
 
 # --- 优选 IP 的 API 地址 ---
 IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
 
 # --- 定义运营商线路 ---
-# 键是用户友好的名称，值是华为云 API 使用的线路代码
 ISP_LINES = {
-    "默认": "default", # "default" 是一个特殊标识，用于区分处理逻辑
+    "默认": "default",
     "移动": "Yidong",
     "电信": "Dianxin",
     "联通": "Liantong"
@@ -48,9 +41,7 @@ def init_huawei_dns_client():
         print("错误: 缺少华为云 AK, SK 或 Project ID，请检查 GitHub Secrets 配置。")
         return False
     
-    credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK,
-                                     sk=HUAWEI_CLOUD_SK,
-                                     project_id=HUAWEI_CLOUD_PROJECT_ID)
+    credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK, sk=HUAWEI_CLOUD_SK, project_id=HUAWEI_CLOUD_PROJECT_ID)
     
     try:
         dns_client = DnsClient.new_builder() \
@@ -75,7 +66,6 @@ def get_zone_id():
         request = ListPublicZonesRequest()
         response = dns_client.list_public_zones(request)
         for z in response.zones:
-            # 华为云的 zone name 会自带一个点
             if z.name == HUAWEI_CLOUD_ZONE_NAME + ".":
                 zone_id = z.id
                 print(f"成功找到 Zone ID: {zone_id}")
@@ -89,148 +79,105 @@ def get_zone_id():
 def get_preferred_ips():
     """从 API 获取优选 IP 列表"""
     print(f"正在从 {IP_API_URL} 获取优选 IP...")
-    retry_count = 3
-    retry_delay = 10
-    for attempt in range(retry_count):
-        try:
-            response = requests.get(IP_API_URL, timeout=10)
-            response.raise_for_status()
-            lines = response.text.strip().split('\n')
-            # 过滤掉注释和空行
-            valid_ips = [line.split('#')[0].strip() for line in lines if line.strip() and not line.startswith('#')]
+    try:
+        response = requests.get(IP_API_URL, timeout=15)
+        response.raise_for_status()
+        lines = response.text.strip().split('\n')
+        valid_ips = [line.split('#')[0].strip() for line in lines if line.strip() and not line.startswith('#')]
 
-            if not valid_ips:
-                print("警告: 从 API 获取到的内容为空或无效。")
-                return []
-            
-            print(f"成功获取并解析了 {len(valid_ips)} 个优选 IP。")
+        if not valid_ips:
+            print("警告: 从 API 获取到的内容为空或无效。")
+            return []
+        
+        print(f"成功获取并解析了 {len(valid_ips)} 个优选 IP。")
 
-            if MAX_IPS and MAX_IPS.isdigit():
-                max_ips_count = int(MAX_IPS)
-                if 0 < max_ips_count < len(valid_ips):
-                    print(f"根据 MAX_IPS={max_ips_count} 的设置，将只使用前 {max_ips_count} 个 IP。")
-                    return valid_ips[:max_ips_count]
-            
-            return valid_ips
-        except requests.RequestException as e:
-            print(f"错误: 请求优选 IP 时发生错误: {e}")
-            if attempt < retry_count - 1:
-                print(f"将在 {retry_delay} 秒后重试...")
-                time.sleep(retry_delay)
-            else:
-                print("已达到最大重试次数，获取 IP 失败。")
-                return []
-    return []
+        if MAX_IPS and MAX_IPS.isdigit():
+            max_ips_count = int(MAX_IPS)
+            if 0 < max_ips_count < len(valid_ips):
+                print(f"根据 MAX_IPS={max_ips_count} 的设置，将只使用前 {max_ips_count} 个 IP。")
+                return valid_ips[:max_ips_count]
+        
+        return valid_ips
+    except requests.RequestException as e:
+        print(f"错误: 请求优选 IP 时发生错误: {e}")
+        return []
 
-# MODIFIED: 修改此函数，使其可以处理默认线路和带线路的查询
 def get_existing_dns_records(line_code):
     """获取指定线路下，当前域名已有的 A 记录"""
     friendly_name = "默认 (default)" if line_code == "default" else line_code
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {friendly_name}) 的现有 DNS A 记录...")
     try:
-        request = ListRecordSetsByZoneRequest(
-            zone_id=zone_id
-        )
+        request = ListRecordSetsByZoneRequest(zone_id=zone_id)
         request.name = DOMAIN_NAME + "."
         request.type = "A"
         
-        # 关键修改：只有当 line_code 不是 "default" 时，才设置 line 参数
         if line_code != "default":
             request.line = line_code
-        
-        # 如果是查询默认线路，需要使用 list_record_sets_by_zone
-        # 如果是查询带线路的，也同样可以使用这个，但为了精确，分开调用
-        if line_code == "default":
-             response = dns_client.list_record_sets(request)
+            response = dns_client.list_record_sets_by_zone(request)
         else:
-             response = dns_client.list_record_sets_by_zone(request)
+            # 查询默认线路时不能带 line 参数
+            request_no_line = ListRecordSetsRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
+            response = dns_client.list_record_sets(request_no_line)
 
         print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
         return response.recordsets
     except exceptions.ClientRequestException as e:
-        # 针对默认线路不存在时API返回404的情况，这是正常行为，不应视为错误
-        if line_code == "default" and hasattr(e, 'status_code') and e.status_code == 404:
+        # API 对于不存在的记录会返回 404，这是正常情况
+        if hasattr(e, 'status_code') and e.status_code == 404:
             print("查询到 0 条已存在的 A 记录。")
             return []
         print(f"错误: 查询 DNS 记录时发生错误: {e}")
         return []
 
-
-def delete_dns_record(record_id):
-    """删除指定的 DNS 记录"""
+def create_record_set(ip_list, line_code):
+    """根据线路创建新的解析记录集 (默认或带线路)"""
     try:
-        request = DeleteRecordSetRequest(zone_id=zone_id, recordset_id=record_id)
-        dns_client.delete_record_set(request)
-        print(f"成功删除记录: {record_id}")
-        return True
-    except exceptions.ClientRequestException as e:
-        print(f"错误: 删除记录 {record_id} 时失败: {e}")
-        return False
-
-# NEW FUNCTION: 新增一个专门用于创建默认记录集的函数
-def create_default_record_set(ip_list):
-    """将所有 IP 创建到'全网默认'的一个解析记录集中"""
-    if not ip_list:
-        print("IP 列表为空，无需创建记录。")
-        return False
+        if line_code == "default":
+            print(f"准备为 '全网默认' 创建一个新的解析记录集...")
+            body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
+            request = CreateRecordSetRequest(zone_id=zone_id, body=body)
+            dns_client.create_record_set(request)
+        else:
+            print(f"准备为线路 '{line_code}' 创建一个新的解析记录集...")
+            body = CreateRecordSetWithLineRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60, line=line_code)
+            request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
+            dns_client.create_record_set_with_line(request)
         
-    print(f"准备将 {len(ip_list)} 个 IP 创建到 '全网默认' 的一个解析记录集中...")
-    try:
-        # 使用不带 line 的请求体 CreateRecordSetRequestBody
-        body = CreateRecordSetRequestBody(
-            name=DOMAIN_NAME + ".", 
-            type="A", 
-            records=ip_list, 
-            ttl=60
-        )
-        
-        # 使用不带 line 的请求接口 CreateRecordSetRequest
-        request = CreateRecordSetRequest(zone_id=zone_id, body=body)
-        dns_client.create_record_set(request)
-
-        print(f"成功为 {DOMAIN_NAME} (线路: 默认) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
-        return True
-    except exceptions.ClientRequestException as e:
-        print(f"错误: 创建'全网默认'解析记录集时失败: {e}")
-        if hasattr(e, 'error_msg'):
-            print(f"API 返回信息: {e.error_msg}")
-        return False
-
-
-def create_lined_record_set(ip_list, line_code):
-    """将所有 IP 创建到指定线路的一个解析记录集中（原函数重命名）"""
-    if not ip_list:
-        print("IP 列表为空，无需创建记录。")
-        return False
-        
-    print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
-    try:
-        # 使用正确的请求体类 CreateRecordSetWithLineRequestBody 来构建请求
-        body = CreateRecordSetWithLineRequestBody(
-            name=DOMAIN_NAME + ".", 
-            type="A", 
-            records=ip_list, 
-            ttl=60,
-            line=line_code
-        )
-        
-        request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
-        dns_client.create_record_set_with_line(request)
-
         print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
         return True
     except exceptions.ClientRequestException as e:
         print(f"错误: 创建解析记录集时失败: {e}")
-        # 尝试打印更详细的错误信息
-        if hasattr(e, 'error_msg'):
-            print(f"API 返回信息: {e.error_msg}")
+        if hasattr(e, 'error_msg'): print(f"API 返回信息: {e.error_msg}")
+        return False
+
+# NEW: 统一的更新函数
+def update_record_set(record_id, ip_list, line_code):
+    """根据线路更新已有的解析记录集 (默认或带线路)"""
+    try:
+        if line_code == "default":
+            print(f"准备更新 '全网默认' 的解析记录 (ID: {record_id})...")
+            body = UpdateRecordSetReq(records=ip_list, ttl=60)
+            request = UpdateRecordSetRequest(zone_id=zone_id, recordset_id=record_id, body=body)
+            dns_client.update_record_set(request)
+        else:
+            # 注意：更新带线路的记录集也使用不带 line 的 UpdateRecordSetReq
+            print(f"准备更新线路 '{line_code}' 的解析记录 (ID: {record_id})...")
+            body = UpdateRecordSetReq(records=ip_list, ttl=60)
+            request = UpdateRecordSetRequest(zone_id=zone_id, recordset_id=record_id, body=body)
+            dns_client.update_record_set(request)
+
+        print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 更新了包含 {len(ip_list)} 个 IP 的 A 记录。")
+        return True
+    except exceptions.ClientRequestException as e:
+        print(f"错误: 更新解析记录集时失败: {e}")
+        if hasattr(e, 'error_msg'): print(f"API 返回信息: {e.error_msg}")
         return False
 
 def main():
     """主执行函数"""
     print("--- 开始更新华为云优选 IP ---")
     
-    if not all([DOMAIN_NAME]):
+    if not DOMAIN_NAME:
         print("错误: 缺少必要的 DOMAIN_NAME 环境变量。")
         return
 
@@ -243,28 +190,24 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    # 遍历所有定义的运营商线路
+    # REFACTORED: 采用 Update or Create (Upsert) 逻辑
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
-        # 1. 获取并删除该线路下的旧记录
         existing_records = get_existing_dns_records(line_code)
+        
         if existing_records:
-            print(f"--- 开始删除线路 '{line_name}' 的旧 DNS 记录 ---")
-            for record in existing_records:
-                delete_dns_record(record.id)
+            # 记录已存在，执行更新
+            # 通常一个域名/线路组合只有一个记录集，我们只更新第一个找到的
+            record_to_update = existing_records[0]
+            print(f"记录已存在 (ID: {record_to_update.id})，准备执行更新操作。")
+            update_record_set(record_to_update.id, new_ips, line_code)
         else:
-            print("没有需要删除的旧记录。")
-
-        # 2. MODIFIED: 在该线路下创建新的记录集, 根据 line_code 调用不同函数
-        print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
-        if line_code == "default":
-            create_default_record_set(new_ips)
-        else:
-            create_lined_record_set(new_ips, line_code)
+            # 记录不存在，执行创建
+            print("记录不存在，准备执行创建操作。")
+            create_record_set(new_ips, line_code)
     
     print("\n--- 所有线路更新完成 ---")
-
 
 if __name__ == '__main__':
     main()
