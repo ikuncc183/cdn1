@@ -113,12 +113,16 @@ def get_existing_dns_records():
     """获取当前域名已有的 A 记录 (华为云版)"""
     print(f"正在查询域名 {DOMAIN_NAME} 的现有 DNS A 记录...")
     try:
-        # 只查询默认线路的记录
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A", line="default")
+        request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
         response = dns_client.list_record_sets_by_zone(request)
         
-        print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
-        return response.recordsets
+        matching_records = []
+        for record in response.recordsets:
+            if record.name == DOMAIN_NAME + "." and record.type == "A":
+                matching_records.append(record)
+
+        print(f"查询到 {len(matching_records)} 条已存在的 A 记录。")
+        return matching_records
     except exceptions.ClientRequestException as e:
         print(f"错误: 查询 DNS 记录时发生错误: {e}")
         return []
@@ -142,8 +146,11 @@ def create_dns_record_set(ip_list):
         
     print(f"准备将 {len(ip_list)} 个 IP 创建到一个解析记录集中...")
     try:
-        # 只为默认线路创建记录
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60, line="default")
+        # 核心逻辑：将所有 IP 放入 records 列表中，一次性创建
+        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
+        
+        # 对于加权解析，权重是记录集(RecordSet)的属性。如果需要，可以取消下面一行的注释。
+        # body.weight = 1 
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
