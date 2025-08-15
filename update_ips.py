@@ -97,7 +97,7 @@ def get_preferred_ips():
             response.raise_for_status()
             lines = response.text.strip().split('\n')
             # 过滤掉注释和空行
-            valid_ips = [line.split('#')[0].strip() for line in lines if line.strip()]
+            valid_ips = [line.split('#')[0].strip() for line in lines if line.strip() and not line.startswith('#')]
 
             if not valid_ips:
                 print("警告: 从 API 获取到的内容为空或无效。")
@@ -127,13 +127,13 @@ def get_existing_dns_records(line_code):
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
     try:
         # --- 核心修改点 1 ---
-        # 将 line 参数直接在初始化时传入
+        # 先创建请求对象，再单独设置 line 参数，以提高兼容性
         request = ListRecordSetsByZoneRequest(
-            zone_id=zone_id, 
-            name=DOMAIN_NAME + ".", 
-            type="A",
-            line=line_code
+            zone_id=zone_id,
         )
+        request.name = DOMAIN_NAME + "."
+        request.type = "A"
+        request.line = line_code
         
         response = dns_client.list_record_sets_by_zone(request)
         
@@ -163,21 +163,26 @@ def create_dns_record_set(ip_list, line_code):
     print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
     try:
         # --- 核心修改点 2 ---
-        # 将 line 参数直接在初始化 body 时传入
-        body = CreateRecordSetRequestBody(
+        # 先创建 body 对象，再单独设置 line 参数，以提高兼容性
+        record_set_body = CreateRecordSet(
             name=DOMAIN_NAME + ".", 
             type="A", 
             records=ip_list, 
-            ttl=60,
-            line=line_code
+            ttl=60
         )
+        record_set_body.line = line_code
         
-        request = CreateRecordSetRequest(zone_id=zone_id, body=body)
-        dns_client.create_record_set(request)
+        body = CreateRecordSetRequestBody(recordset=record_set_body)
+        request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
+        dns_client.create_record_set_with_line(request)
+
         print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
         return True
     except exceptions.ClientRequestException as e:
         print(f"错误: 创建解析记录集时失败: {e}")
+        # 尝试打印更详细的错误信息
+        if hasattr(e, 'error_msg'):
+            print(f"API 返回信息: {e.error_msg}")
         return False
 
 def main():
