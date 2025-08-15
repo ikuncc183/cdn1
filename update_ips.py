@@ -12,23 +12,29 @@ from huaweicloudsdkdns.v2 import *
 from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
 
 # --- 从 GitHub Secrets 读取配置 ---
+# 华为云访问密钥 ID (Access Key ID)
 HUAWEI_CLOUD_AK = os.environ.get('HUAWEI_CLOUD_AK')
+# 华为云秘密访问密钥 (Secret Access Key)
 HUAWEI_CLOUD_SK = os.environ.get('HUAWEI_CLOUD_SK')
+# 华为云 Project ID
 HUAWEI_CLOUD_PROJECT_ID = os.environ.get('HUAWEI_CLOUD_PROJECT_ID')
+# 华为云托管的公网域名 (Zone Name)
 HUAWEI_CLOUD_ZONE_NAME = os.environ.get('HUAWEI_CLOUD_ZONE_NAME')
+# 需要更新解析的完整域名
 DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
+# (可选) 需要解析的IP数量
 MAX_IPS = os.environ.get('MAX_IPS')
 
-# --- API 地址 ---
-IP_API_URL = 'https://www.wetest.vip/api/cf2dns/get_cloudflare_ip?key=o1zrmHAF&type=v4'
+# --- 优选 IP 的 API 地址 ---
+IP_API_URL = 'https://raw.githubusercontent.com/hubbylei/bestcf/main/bestcf.txt'
 
-# --- API Key 到华为云线路代码的映射 (已修复为大写) ---
-# 新增了 "default" 线路，它将使用 "CT" (电信) 的 IP
-ISP_LINE_MAP = {
-    "default": "default", # 默认线路
-    "CM": "chinamobile",  # 移动
-    "CU": "chinaunicom",  # 联通
-    "CT": "chinatelecom"  # 电信
+# --- 新增：定义运营商线路 ---
+# 键是用户友好的名称，值是华为云 API 使用的线路代码
+ISP_LINES = {
+    "默认": "default",
+    "移动": "chinamobile",
+    "电信": "chinatelecom",
+    "联通": "chinaunicom"
 }
 
 # --- 全局变量 ---
@@ -42,7 +48,9 @@ def init_huawei_dns_client():
         print("错误: 缺少华为云 AK, SK 或 Project ID，请检查 GitHub Secrets 配置。")
         return False
     
-    credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK, sk=HUAWEI_CLOUD_SK, project_id=HUAWEI_CLOUD_PROJECT_ID)
+    credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK,
+                                   sk=HUAWEI_CLOUD_SK,
+                                   project_id=HUAWEI_CLOUD_PROJECT_ID)
     
     try:
         dns_client = DnsClient.new_builder() \
@@ -77,50 +85,49 @@ def get_zone_id():
         print(f"错误: 查询 Zone ID 时发生 API 错误: {e}")
         return False
 
-def get_ips_from_api():
-    """从新的 JSON API 获取按运营商分类的 IP 字典"""
+def get_preferred_ips():
+    """从 API 获取优选 IP 列表"""
     print(f"正在从 {IP_API_URL} 获取优选 IP...")
-    try:
-        response = requests.get(IP_API_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        print("--- API 原始返回数据 ---")
-        print(json.dumps(data, indent=2))
-        print("-----------------------")
-        
-        if not data.get("status"):
-            print(f"错误: API 返回状态为 false, 消息: {data.get('msg')}")
-            return None
+    retry_count = 3
+    retry_delay = 10
+    for attempt in range(retry_count):
+        try:
+            response = requests.get(IP_API_URL, timeout=10)
+            response.raise_for_status()
+            lines = response.text.strip().split('\n')
+            valid_ips = [line.split('#')[0].strip() for line in lines if line.strip()]
 
-        info = data.get("info", {})
-        if not info:
-            print("警告: API 返回的数据中 'info' 字段为空或不存在。")
-            return {}
+            if not valid_ips:
+                print("警告: 从 API 获取到的内容为空或无效。")
+                return []
+            
+            print(f"成功获取并解析了 {len(valid_ips)} 个优选 IP。")
 
-        parsed_ips = {}
-        for isp_key, ip_objects in info.items():
-            if isinstance(ip_objects, list):
-                parsed_ips[isp_key] = [obj["address"] for obj in ip_objects if "address" in obj]
+            if MAX_IPS and MAX_IPS.isdigit():
+                max_ips_count = int(MAX_IPS)
+                if 0 < max_ips_count < len(valid_ips):
+                    print(f"根据 MAX_IPS={max_ips_count} 的设置，将只使用前 {max_ips_count} 个 IP。")
+                    return valid_ips[:max_ips_count]
+            
+            return valid_ips
+        except requests.RequestException as e:
+            print(f"错误: 请求优选 IP 时发生错误: {e}")
+            if attempt < retry_count - 1:
+                time.sleep(retry_delay)
             else:
-                print(f"警告: '{isp_key}' 的值不是一个列表, 跳过。")
-        
-        print("成功从 API 获取并解析了 IP 数据。")
-        return parsed_ips
+                return []
+    return []
 
-    except requests.RequestException as e:
-        print(f"错误: 请求优选 IP 时发生错误: {e}")
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        print(f"错误: 解析 API 返回的 JSON 数据失败: {e}")
-    return None
-
-def get_existing_records(line_code):
-    """获取指定线路的现有 A 记录"""
-    print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 A 记录...")
+def get_existing_dns_records(line_code):
+    """获取指定线路下，当前域名已有的 A 记录"""
+    print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
     try:
+        # 核心修改：先创建请求对象，再为其设置线路属性
         request = ListRecordSetsByZoneRequest(zone_id=zone_id, name=DOMAIN_NAME + ".", type="A")
         request.line = line_code
+        
         response = dns_client.list_record_sets_by_zone(request)
+        
         print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
         return response.recordsets
     except exceptions.ClientRequestException as e:
@@ -138,62 +145,62 @@ def delete_dns_record(record_id):
         print(f"错误: 删除记录 {record_id} 时失败: {e}")
         return False
 
-def create_a_record_set(ip_list, line_code):
-    """为指定线路创建 A 记录集"""
+def create_dns_record_set(ip_list, line_code):
+    """将所有 IP 创建到指定线路的一个解析记录集中"""
     if not ip_list:
-        print(f"线路 '{line_code}' 的 IP 列表为空，跳过创建。")
+        print("IP 列表为空，无需创建记录。")
         return False
-    print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}'...")
+        
+    print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
     try:
+        # 核心修改：先创建 body 对象，再为其设置 line 属性
         body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
         body.line = line_code
+        
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
-        print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了 A 记录。")
+        print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
         return True
     except exceptions.ClientRequestException as e:
-        print(f"错误: 创建 A 记录集时失败: {e}")
+        print(f"错误: 创建解析记录集时失败: {e}")
         return False
 
 def main():
     """主执行函数"""
-    print("--- 开始更新华为云优选 IP (分线路版) ---")
+    print("--- 开始更新华为云优选 IP ---")
     
+    if not all([DOMAIN_NAME]):
+        print("错误: 缺少必要的 DOMAIN_NAME 环境变量。")
+        return
+
     if not init_huawei_dns_client() or not get_zone_id():
         print("华为云客户端初始化或 Zone ID 获取失败，任务终止。")
         return
 
-    all_ips_by_isp = get_ips_from_api()
-    if all_ips_by_isp is None:
-        print("未能获取优选 IP 数据，本次任务终止。")
+    new_ips = get_preferred_ips()
+    if not new_ips:
+        print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    for api_key, line_code in ISP_LINE_MAP.items():
-        print(f"\n--- 正在处理线路: {api_key} ({line_code}) ---")
-        
-        # 特殊处理默认线路，让它使用电信的 IP
-        source_key = "CT" if api_key == "default" else api_key
-        ip_list = all_ips_by_isp.get(source_key, [])
-        
-        if not ip_list:
-            print(f"API 数据中未找到源 '{source_key}' 的 IP 列表，跳过此线路。")
-            continue
+    # --- 核心修改：遍历所有定义的运营商线路 ---
+    for line_name, line_code in ISP_LINES.items():
+        print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
-        # 应用 MAX_IPS 限制
-        if MAX_IPS and MAX_IPS.isdigit():
-            max_count = int(MAX_IPS)
-            if 0 < max_count < len(ip_list):
-                print(f"根据 MAX_IPS={max_count} 的设置，将只使用前 {max_count} 个 IP。")
-                ip_list = ip_list[:max_count]
+        # 1. 获取并删除该线路下的旧记录
+        existing_records = get_existing_dns_records(line_code)
+        if existing_records:
+            print(f"--- 开始删除线路 '{line_name}' 的旧 DNS 记录 ---")
+            for record in existing_records:
+                delete_dns_record(record.id)
+        else:
+            print("没有需要删除的旧记录。")
 
-        # 删除该线路下的旧 A 记录
-        for record in get_existing_records(line_code):
-            delete_dns_record(record.id)
-        
-        # 创建新的 A 记录集
-        create_a_record_set(ip_list, line_code)
-
+        # 2. 在该线路下创建新的记录集
+        print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
+        create_dns_record_set(new_ips, line_code)
+    
     print("\n--- 所有线路更新完成 ---")
+
 
 if __name__ == '__main__':
     main()
