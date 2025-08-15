@@ -138,19 +138,27 @@ def delete_dns_record(record_id):
         print(f"错误: 删除记录 {record_id} 时失败: {e}")
         return False
 
-def create_dns_record(ip):
-    """为给定的 IP 创建一条新的 A 记录 (华为云版) - 已修复权重问题"""
+def create_dns_record_set(ip_list):
+    """将所有 IP 创建到一个解析记录集中 (华为云版)"""
+    if not ip_list:
+        print("IP 列表为空，无需创建记录。")
+        return False
+        
+    print(f"准备将 {len(ip_list)} 个 IP 创建到一个解析记录集中...")
     try:
-        # 修改：先创建 body 对象，再为其设置 weight 属性
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=[ip], ttl=60)
-        body.weight = 1
+        # 核心修改：将所有 IP 放入 records 列表中，一次性创建
+        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
+        
+        # 对于加权解析，权重是记录集(RecordSet)的属性，而不是单个IP的。
+        # 如果需要，可以取消下面一行的注释来设置权重。默认为1。
+        # body.weight = 1 
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
-        print(f"成功为 IP {ip} 创建 A 记录 (权重为 1)。")
+        print(f"成功为 {DOMAIN_NAME} 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
         return True
     except exceptions.ClientRequestException as e:
-        print(f"错误: 为 IP {ip} 创建 A 记录时失败: {e}")
+        print(f"错误: 创建解析记录集时失败: {e}")
         return False
 
 def main():
@@ -179,13 +187,12 @@ def main():
         print("没有需要删除的旧记录。")
 
     print("\n--- 开始创建新的 DNS 记录 ---")
-    success_count = 0
-    for ip in new_ips:
-        if create_dns_record(ip):
-            success_count += 1
-    
-    print(f"\n--- 更新完成 ---")
-    print(f"成功为 {success_count}/{len(new_ips)} 个 IP 地址创建了 DNS 记录。")
+    # 核心修改：不再循环，而是调用新的函数一次性创建所有记录
+    if create_dns_record_set(new_ips):
+        print(f"\n--- 更新完成 ---")
+    else:
+        print(f"\n--- 更新失败 ---")
+
 
 if __name__ == '__main__':
     main()
