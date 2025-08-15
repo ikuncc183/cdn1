@@ -19,8 +19,8 @@ HUAWEI_CLOUD_ZONE_NAME = os.environ.get('HUAWEI_CLOUD_ZONE_NAME')
 DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 MAX_IPS = os.environ.get('MAX_IPS')
 
-# --- ！！！请将此处的 URL 修改为您自己的 API 地址！！！ ---
-IP_API_URL = 'https://www.wetest.vip/api/cf2dns/get_cloudflare_ip?key=o1zrmHAF&type=v4'
+# --- API 地址已更新 ---
+IP_API_URL = 'https://www.wetest.vip/api/cf2dns/get_cloudflare_ip?key=o1zrW4AF&type=v4'
 
 # --- API Key 到华为云线路代码的映射 ---
 # 新增了 "default" 线路，它将使用 "ct" (电信) 的 IP
@@ -85,14 +85,27 @@ def get_ips_from_api():
         response.raise_for_status()
         data = response.json()
         
+        # --- 新增：打印 API 返回的原始数据以供诊断 ---
+        print("--- API 原始返回数据 ---")
+        print(json.dumps(data, indent=2))
+        print("-----------------------")
+        
         if not data.get("status"):
             print("错误: API 返回状态为 false。")
             return None
 
         info = data.get("info", {})
+        if not info:
+            print("警告: API 返回的数据中 'info' 字段为空或不存在。")
+            return {} # 返回空字典而不是 None
+
         parsed_ips = {}
         for isp_key, ip_objects in info.items():
-            parsed_ips[isp_key] = [obj["address"] for obj in ip_objects]
+            # 确保 ip_objects 是一个列表
+            if isinstance(ip_objects, list):
+                parsed_ips[isp_key] = [obj["address"] for obj in ip_objects if "address" in obj]
+            else:
+                print(f"警告: '{isp_key}' 的值不是一个列表, 跳过。")
         
         print("成功从 API 获取并解析了 IP 数据。")
         return parsed_ips
@@ -153,7 +166,7 @@ def main():
         return
 
     all_ips_by_isp = get_ips_from_api()
-    if not all_ips_by_isp:
+    if all_ips_by_isp is None: # 严格检查 None，允许空字典通过
         print("未能获取优选 IP 数据，本次任务终止。")
         return
 
