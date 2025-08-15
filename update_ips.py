@@ -40,7 +40,7 @@ ISP_LINES = {
 dns_client = None
 zone_id = None
 
-def init_huawe_dns_client():
+def init_huawei_dns_client():
     """初始化华为云 DNS 客户端"""
     global dns_client
     if not all([HUAWEI_CLOUD_AK, HUAWEI_CLOUD_SK, HUAWEI_CLOUD_PROJECT_ID]):
@@ -122,19 +122,36 @@ def get_preferred_ips():
     return []
 
 def get_existing_dns_records(line_code):
-    """获取指定线路下，当前域名已有的 A 记录"""
+    """获取指定线路下，当前域名已有的 A 记录，并处理分页"""
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
+    all_records = []
+    limit = 100  # 每次请求最多获取100条记录
+    offset = 0
     try:
-        # 使用兼容性写法，先创建对象再设置属性
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id)
-        request.name = DOMAIN_NAME + "."
-        request.type = "A"
-        request.line = line_code
-        
-        response = dns_client.list_record_sets_by_zone(request)
-        
-        print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
-        return response.recordsets
+        while True:
+            # 使用兼容性写法，先创建对象再设置属性
+            request = ListRecordSetsByZoneRequest(zone_id=zone_id)
+            request.name = DOMAIN_NAME + "."
+            request.type = "A"
+            request.line = line_code
+            request.limit = limit
+            request.offset = offset
+            
+            response = dns_client.list_record_sets_by_zone(request)
+            
+            if not response.recordsets:
+                break  # 如果没有返回记录，则退出循环
+            
+            all_records.extend(response.recordsets)
+            
+            # 如果返回的记录数小于请求的限制数，说明已经是最后一页
+            if len(response.recordsets) < limit:
+                break
+            
+            offset += limit  # 移动到下一页
+
+        print(f"查询到 {len(all_records)} 条已存在的 A 记录。")
+        return all_records
     except exceptions.ClientRequestException as e:
         print(f"错误: 查询 DNS 记录时发生错误: {e}")
         return []
@@ -186,7 +203,7 @@ def main():
         print("错误: 缺少必要的 DOMAIN_NAME 环境变量。")
         return
 
-    if not init_huawe_dns_client() or not get_zone_id():
+    if not init_huawei_dns_client() or not get_zone_id():
         print("华为云客户端初始化或 Zone ID 获取失败，任务终止。")
         return
 
