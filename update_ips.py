@@ -26,7 +26,7 @@ DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 MAX_IPS = os.environ.get('MAX_IPS')
 
 # --- 优选 IP 的 API 地址 ---
-IP_API_URL = 'https://addressesapi.090227.xyz/ip.164746.xyz'
+IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
 
 # --- 新增：定义运营商线路 ---
 # 键是用户友好的名称，值是华为云 API 使用的线路代码
