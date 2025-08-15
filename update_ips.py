@@ -141,8 +141,10 @@ def delete_dns_record(record_id):
 def create_dns_record(ip):
     """为给定的 IP 创建一条新的 A 记录 (华为云版) - 已修复权重问题"""
     try:
-        # 修改：新增 weight=1 参数以满足加权解析的要求
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=[ip], ttl=60, weight=1)
+        # 修改：先创建 body 对象，再为其设置 weight 属性
+        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=[ip], ttl=60)
+        body.weight = 1
+        
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
         print(f"成功为 IP {ip} 创建 A 记录 (权重为 1)。")
