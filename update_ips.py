@@ -126,7 +126,6 @@ def get_existing_dns_records(line_code):
     """获取指定线路下，当前域名已有的 A 记录"""
     print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
     try:
-        # --- 核心修改点 1 ---
         # 先创建请求对象，再单独设置 line 参数，以提高兼容性
         request = ListRecordSetsByZoneRequest(
             zone_id=zone_id,
@@ -162,17 +161,16 @@ def create_dns_record_set(ip_list, line_code):
         
     print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
     try:
-        # --- 核心修改点 2 ---
-        # 先创建 body 对象，再单独设置 line 参数，以提高兼容性
-        record_set_body = CreateRecordSet(
+        # --- 核心修改点 ---
+        # 使用正确的请求体类 CreateRecordSetWithLineReq 来构建请求
+        body = CreateRecordSetWithLineReq(
             name=DOMAIN_NAME + ".", 
             type="A", 
             records=ip_list, 
-            ttl=60
+            ttl=60,
+            line=line_code
         )
-        record_set_body.line = line_code
         
-        body = CreateRecordSetRequestBody(recordset=record_set_body)
         request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set_with_line(request)
 
