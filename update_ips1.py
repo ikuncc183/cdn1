@@ -35,13 +35,14 @@ zone_id = None
 def init_huawei_dns_client():
     """初始化华为云 DNS 客户端"""
     global dns_client
-    if not all([HUAWEI_CLOUD_AK, HUAWEI_CLOUD_SK, HUAWEI_CLOUD_PROJECT_ID]):
-        print("错误: 缺少华为云 AK, SK 或 Project ID，请检查 GitHub Secrets 配置。")
+    # 关键修正：BasicCredentials 不使用 project_id，因此检查中也暂时移除
+    if not all([HUAWEI_CLOUD_AK, HUAWEI_CLOUD_SK]):
+        print("错误: 缺少华为云 AK 或 SK，请检查 GitHub Secrets 配置。")
         return False
     
+    # 关键修正：根据报错信息，移除 BasicCredentials 中的 project_id 参数
     credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK,
-                                     sk=HUAWEI_CLOUD_SK,
-                                     project_id=HUAWEI_CLOUD_PROJECT_ID)
+                                     sk=HUAWEI_CLOUD_SK)
     
     try:
         dns_client = DnsClient.new_builder() \
