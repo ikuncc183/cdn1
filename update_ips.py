@@ -110,14 +110,12 @@ def get_preferred_ips():
     return []
 
 def get_existing_dns_records():
-    """获取当前域名已有的 A 记录 (华为云版) - 已修复"""
+    """获取当前域名已有的 A 记录 (华为云版)"""
     print(f"正在查询域名 {DOMAIN_NAME} 的现有 DNS A 记录...")
     try:
-        # 修改：不再按名称和类型精确查找，而是查找Zone下的所有记录，然后在本地过滤
         request = ListRecordSetsByZoneRequest(zone_id=zone_id)
         response = dns_client.list_record_sets_by_zone(request)
         
-        # 在本地进行过滤，确保找到所有匹配的 A 记录
         matching_records = []
         for record in response.recordsets:
             if record.name == DOMAIN_NAME + "." and record.type == "A":
@@ -141,12 +139,13 @@ def delete_dns_record(record_id):
         return False
 
 def create_dns_record(ip):
-    """为给定的 IP 创建一条新的 A 记录 (华为云版)"""
+    """为给定的 IP 创建一条新的 A 记录 (华为云版) - 已修复权重问题"""
     try:
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=[ip], ttl=60)
+        # 修改：新增 weight=1 参数以满足加权解析的要求
+        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=[ip], ttl=60, weight=1)
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
-        print(f"成功为 IP {ip} 创建 A 记录。")
+        print(f"成功为 IP {ip} 创建 A 记录 (权重为 1)。")
         return True
     except exceptions.ClientRequestException as e:
         print(f"错误: 为 IP {ip} 创建 A 记录时失败: {e}")
