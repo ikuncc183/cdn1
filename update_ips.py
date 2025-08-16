@@ -118,12 +118,10 @@ def get_preferred_ips():
                 return []
     return []
 
-# 最终修复: 修正 SDK 调用语法
 def get_existing_records_for_line(line_code):
     """获取指定线路下，当前域名的 A 记录"""
     print(f"正在使用线路接口查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 A 记录...")
     try:
-        # 修正 SDK 调用方式：先创建对象，再设置属性
         request = ListRecordSetsWithLineRequest()
         request.zone_id = zone_id
         request.name = DOMAIN_NAME + "."
@@ -142,17 +140,32 @@ def get_existing_records_for_line(line_code):
         return []
 
 def delete_dns_record(record_id):
-    """删除指定的 DNS 记录"""
+    """删除指定的 DNS 记录 (增加验证步骤)"""
+    # 步骤 1: 验证记录是否存在
     try:
-        # 修正 SDK 调用方式：先创建对象，再设置属性
-        request = DeleteRecordSetRequest()
-        request.zone_id = zone_id
-        request.recordset_id = record_id
-        dns_client.delete_record_set(request)
-        print(f"成功删除记录: {record_id}")
+        print(f"  > 正在验证记录 {record_id} 是否存在...")
+        show_request = ShowRecordSetRequest()
+        show_request.zone_id = zone_id
+        show_request.recordset_id = record_id
+        dns_client.show_record_set(show_request)
+        print(f"  > 验证成功，记录 {record_id} 存在。")
+    except exceptions.ClientRequestException as e:
+        # 如果连查询都失败，且错误是 "not exist"，说明 ID 确实有问题
+        print(f"  > 验证失败: 无法获取记录 {record_id}。API 错误: {e.error_msg}")
+        print(f"  > 跳过删除此条记录。")
+        return True # 返回 True 以免阻塞流程
+
+    # 步骤 2: 执行删除
+    try:
+        print(f"  > 正在删除记录 {record_id} ...")
+        delete_request = DeleteRecordSetRequest()
+        delete_request.zone_id = zone_id
+        delete_request.recordset_id = record_id
+        dns_client.delete_record_set(delete_request)
+        print(f"  > 成功删除记录: {record_id}")
         return True
     except exceptions.ClientRequestException as e:
-        print(f"错误: 删除记录 {record_id} 时失败: {e}")
+        print(f"  > 错误: 删除记录 {record_id} 时失败: {e.error_msg}")
         return False
 
 def create_dns_record_set(ip_list, line_code):
@@ -171,7 +184,6 @@ def create_dns_record_set(ip_list, line_code):
             line=line_code
         )
         
-        # 修正 SDK 调用方式：先创建对象，再设置属性
         request = CreateRecordSetWithLineRequest()
         request.zone_id = zone_id
         request.body = body
@@ -213,6 +225,7 @@ def main():
             print(f"--- 发现 {len(records_to_delete)} 条属于线路 '{line_name}' 的旧记录，开始删除 ---")
             for record in records_to_delete:
                 delete_dns_record(record.id)
+                time.sleep(1) # 在每次删除操作后增加1秒延迟，防止API频率问题
         else:
             print(f"线路 '{line_name}' 没有需要删除的旧记录。")
 
