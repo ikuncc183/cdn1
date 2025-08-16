@@ -219,6 +219,17 @@ def main():
     all_records_in_zone = get_all_records_in_zone()
     if not all_records_in_zone:
         print("未能获取到任何 DNS 记录，将直接尝试创建。")
+    else:
+        # --- 增加详细日志 ---
+        print("--- 打印从 API 获取到的所有记录详情 ---")
+        for i, record in enumerate(all_records_in_zone):
+            print(f"  记录 #{i+1}:")
+            print(f"    ID: {getattr(record, 'id', 'N/A')}")
+            print(f"    Name: {getattr(record, 'name', 'N/A')}")
+            print(f"    Type: {getattr(record, 'type', 'N/A')}")
+            print(f"    Line: {getattr(record, 'line', 'N/A')}")
+            print(f"    Records: {getattr(record, 'records', 'N/A')}")
+        print("--- 详细日志结束 ---")
 
     # 2. 在脚本内筛选出与目标域名相关的 A 记录
     target_name = DOMAIN_NAME + "."
