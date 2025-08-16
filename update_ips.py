@@ -121,23 +121,50 @@ def get_preferred_ips():
                 return []
     return []
 
-# 关键修改点 1: 修改函数，不再按线路筛选，而是获取所有相关的A记录
+# 关键修改点: 增加分页处理逻辑
 def get_all_existing_a_records():
-    """获取当前域名已有的所有 A 记录"""
+    """获取当前域名已有的所有 A 记录 (处理分页)"""
     print(f"正在查询域名 {DOMAIN_NAME} 的所有现有 DNS A 记录...")
-    try:
-        # 只按名称和类型查询，不指定线路
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id)
-        request.name = DOMAIN_NAME + "."
-        request.type = "A"
-        
-        response = dns_client.list_record_sets_by_zone(request)
-        
-        print(f"查询到 {len(response.recordsets)} 条已存在的 A 记录。")
-        return response.recordsets
-    except exceptions.ClientRequestException as e:
-        print(f"错误: 查询 DNS 记录时发生错误: {e}")
-        return []
+    all_records = []
+    marker = None
+    limit = 100  # 每次请求获取100条记录
+    
+    while True:
+        try:
+            request = ListRecordSetsByZoneRequest(zone_id=zone_id)
+            request.name = DOMAIN_NAME + "."
+            request.type = "A"
+            request.limit = limit
+            if marker:
+                request.marker = marker
+            
+            response = dns_client.list_record_sets_by_zone(request)
+            
+            if response.recordsets:
+                all_records.extend(response.recordsets)
+            
+            # 检查是否有下一页
+            if response.links and response.links.next:
+                # 从 next 链接中解析出 marker
+                # 示例: "https://.../v2/zones/.../recordsets?marker=...&limit=100"
+                # 我们需要提取 marker 的值
+                next_link = response.links.next
+                marker_param = "marker="
+                if marker_param in next_link:
+                    marker = next_link.split(marker_param)[1].split('&')[0]
+                else:
+                    break # 如果 next 链接里没有 marker，则结束
+            else:
+                # 如果没有 next 链接，说明是最后一页
+                break
+                
+        except exceptions.ClientRequestException as e:
+            print(f"错误: 查询 DNS 记录时发生错误: {e}")
+            return [] # 出错时返回空列表
+
+    print(f"通过分页查询，总共找到 {len(all_records)} 条已存在的 A 记录。")
+    return all_records
+
 
 def delete_dns_record(record_id):
     """删除指定的 DNS 记录"""
