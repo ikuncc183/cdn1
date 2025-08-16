@@ -1,4 +1,3 @@
-# update_ips.py
 import os
 import requests
 import json
@@ -25,8 +24,12 @@ DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 # (可选) 需要解析的IP数量
 MAX_IPS = os.environ.get('MAX_IPS')
 
-# --- 优选 IP 的 API 地址 ---
-IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
+# --- 优选 IP 的 API 地址 (按线路分别设置) ---
+IP_API_URLS = {
+    "Yidong": os.environ.get('https://ipdb.api.030101.xyz/?type=bestcf&country=true'),    # 移动线路 API
+    "Dianxin": os.environ.get('https://addressesapi.090227.xyz/ip.164746.xyz'), # 电信线路 API
+    "Liantong": os.environ.get('https://addressesapi.090227.xyz/CloudFlareYes') # 联通线路 API
+}
 
 # --- 定义运营商线路 ---
 ISP_LINES = {
@@ -83,14 +86,14 @@ def get_zone_id():
         print(f"错误: 查询 Zone ID 时发生 API 错误: {e}")
         return False
 
-def get_preferred_ips():
-    """从 API 获取优选 IP 列表"""
-    print(f"正在从 {IP_API_URL} 获取优选 IP...")
+def get_preferred_ips(api_url):
+    """从指定的 API 获取优选 IP 列表"""
+    print(f"正在从 {api_url} 获取优选 IP...")
     retry_count = 3
     retry_delay = 10
     for attempt in range(retry_count):
         try:
-            response = requests.get(IP_API_URL, timeout=10)
+            response = requests.get(api_url, timeout=10)
             response.raise_for_status()
             lines = response.text.strip().split('\n')
             valid_ips = [line.split('#')[0].strip() for line in lines if line.strip() and not line.startswith('#')]
@@ -200,14 +203,21 @@ def main():
         print("华为云客户端初始化或 Zone ID 获取失败，任务终止。")
         return
 
-    new_ips = get_preferred_ips()
-    if not new_ips:
-        print("未能获取新的 IP 地址，本次任务终止。")
-        return
-
     # 遍历所有定义的运营商线路
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
+
+        # 获取当前线路对应的 API URL
+        current_api_url = IP_API_URLS.get(line_code)
+        if not current_api_url:
+            print(f"警告: 未为线路 '{line_name}' ({line_code}) 配置 API URL。请设置环境变量 IP_API_URL_{line_code.upper()}。跳过此线路。")
+            continue
+
+        # 为当前线路获取新的 IP 列表
+        new_ips = get_preferred_ips(current_api_url)
+        if not new_ips:
+            print(f"未能从 {current_api_url} 获取新的 IP 地址，跳过此线路。")
+            continue
 
         # 1. 查询当前线路下的旧记录
         existing_records = get_existing_records_for_line(line_code)
