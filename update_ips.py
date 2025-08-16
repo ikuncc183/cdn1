@@ -121,10 +121,10 @@ def get_preferred_ips():
                 return []
     return []
 
-# 关键修改点: 增加分页处理逻辑
-def get_all_existing_a_records():
-    """获取当前域名已有的所有 A 记录 (处理分页)"""
-    print(f"正在查询域名 {DOMAIN_NAME} 的所有现有 DNS A 记录...")
+# 关键修改点: 不再按 name 或 type 筛选，获取 Zone 内所有记录
+def get_all_records_in_zone():
+    """获取当前 Zone 内的所有记录 (处理分页)"""
+    print(f"正在查询 Zone ID '{zone_id}' 内的所有 DNS 记录...")
     all_records = []
     marker = None
     limit = 100  # 每次请求获取100条记录
@@ -132,8 +132,6 @@ def get_all_existing_a_records():
     while True:
         try:
             request = ListRecordSetsByZoneRequest(zone_id=zone_id)
-            request.name = DOMAIN_NAME + "."
-            request.type = "A"
             request.limit = limit
             if marker:
                 request.marker = marker
@@ -145,24 +143,20 @@ def get_all_existing_a_records():
             
             # 检查是否有下一页
             if response.links and response.links.next:
-                # 从 next 链接中解析出 marker
-                # 示例: "https://.../v2/zones/.../recordsets?marker=...&limit=100"
-                # 我们需要提取 marker 的值
                 next_link = response.links.next
                 marker_param = "marker="
                 if marker_param in next_link:
                     marker = next_link.split(marker_param)[1].split('&')[0]
                 else:
-                    break # 如果 next 链接里没有 marker，则结束
+                    break 
             else:
-                # 如果没有 next 链接，说明是最后一页
                 break
                 
         except exceptions.ClientRequestException as e:
             print(f"错误: 查询 DNS 记录时发生错误: {e}")
-            return [] # 出错时返回空列表
+            return [] 
 
-    print(f"通过分页查询，总共找到 {len(all_records)} 条已存在的 A 记录。")
+    print(f"通过分页查询，总共找到 {len(all_records)} 条 DNS 记录。")
     return all_records
 
 
@@ -185,7 +179,6 @@ def create_dns_record_set(ip_list, line_code):
         
     print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
     try:
-        # 使用正确的请求体类 CreateRecordSetWithLineRequestBody
         body = CreateRecordSetWithLineRequestBody(
             name=DOMAIN_NAME + ".", 
             type="A", 
@@ -222,16 +215,26 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    # 主要逻辑变更: 先一次性获取所有记录
-    print("\n--- 获取当前域名所有线路的 A 记录 ---")
-    all_existing_records = get_all_existing_a_records()
+    # 1. 获取 Zone 内的所有记录
+    all_records_in_zone = get_all_records_in_zone()
+    if not all_records_in_zone:
+        print("未能获取到任何 DNS 记录，将直接尝试创建。")
 
-    # 遍历所有定义的运营商线路
+    # 2. 在脚本内筛选出与目标域名相关的 A 记录
+    target_name = DOMAIN_NAME + "."
+    relevant_a_records = [
+        record for record in all_records_in_zone 
+        if hasattr(record, 'name') and record.name == target_name and hasattr(record, 'type') and record.type == "A"
+    ]
+    print(f"在所有记录中，筛选出 {len(relevant_a_records)} 条与 {DOMAIN_NAME} 相关的 A 记录。")
+
+
+    # 3. 遍历所有定义的运营商线路
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
-        # 1. 从已获取的全部记录中，筛选出属于当前线路的记录并删除
-        records_to_delete = [record for record in all_existing_records if record.line == line_code]
+        # 从已筛选的相关记录中，再次筛选出属于当前线路的记录并删除
+        records_to_delete = [record for record in relevant_a_records if hasattr(record, 'line') and record.line == line_code]
         
         if records_to_delete:
             print(f"--- 发现 {len(records_to_delete)} 条属于线路 '{line_name}' 的旧记录，开始删除 ---")
@@ -240,7 +243,7 @@ def main():
         else:
             print(f"线路 '{line_name}' 没有需要删除的旧记录。")
 
-        # 2. 在该线路下创建新的记录集
+        # 在该线路下创建新的记录集
         print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
         create_dns_record_set(new_ips, line_code)
     
