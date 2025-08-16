@@ -121,15 +121,15 @@ def get_preferred_ips():
                 return []
     return []
 
-def get_existing_dns_records(line_code):
-    """获取指定线路下，当前域名已有的 A 记录"""
-    print(f"正在查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 DNS A 记录...")
+# 关键修改点 1: 修改函数，不再按线路筛选，而是获取所有相关的A记录
+def get_all_existing_a_records():
+    """获取当前域名已有的所有 A 记录"""
+    print(f"正在查询域名 {DOMAIN_NAME} 的所有现有 DNS A 记录...")
     try:
-        # 使用兼容性写法，先创建对象再设置属性
+        # 只按名称和类型查询，不指定线路
         request = ListRecordSetsByZoneRequest(zone_id=zone_id)
         request.name = DOMAIN_NAME + "."
         request.type = "A"
-        request.line = line_code
         
         response = dns_client.list_record_sets_by_zone(request)
         
@@ -195,18 +195,23 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
+    # 主要逻辑变更: 先一次性获取所有记录
+    print("\n--- 获取当前域名所有线路的 A 记录 ---")
+    all_existing_records = get_all_existing_a_records()
+
     # 遍历所有定义的运营商线路
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
-        # 1. 获取并删除该线路下的旧记录
-        existing_records = get_existing_dns_records(line_code)
-        if existing_records:
-            print(f"--- 开始删除线路 '{line_name}' 的旧 DNS 记录 ---")
-            for record in existing_records:
+        # 1. 从已获取的全部记录中，筛选出属于当前线路的记录并删除
+        records_to_delete = [record for record in all_existing_records if record.line == line_code]
+        
+        if records_to_delete:
+            print(f"--- 发现 {len(records_to_delete)} 条属于线路 '{line_name}' 的旧记录，开始删除 ---")
+            for record in records_to_delete:
                 delete_dns_record(record.id)
         else:
-            print("没有需要删除的旧记录。")
+            print(f"线路 '{line_name}' 没有需要删除的旧记录。")
 
         # 2. 在该线路下创建新的记录集
         print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
