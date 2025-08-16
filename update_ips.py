@@ -29,7 +29,6 @@ MAX_IPS = os.environ.get('MAX_IPS')
 IP_API_URL = 'https://raw.githubusercontent.com/hubbylei/bestcf/main/bestcf.txt'
 
 # --- 定义运营商线路 ---
-# 核心修改点：将线路代码更新为华为云普遍接受的拼音格式
 ISP_LINES = {
     "移动": "Yidong",
     "电信": "Dianxin",
@@ -74,7 +73,6 @@ def get_zone_id():
         request = ListPublicZonesRequest()
         response = dns_client.list_public_zones(request)
         for z in response.zones:
-            # 华为云的 zone name 会自带一个点
             if z.name == HUAWEI_CLOUD_ZONE_NAME + ".":
                 zone_id = z.id
                 print(f"成功找到 Zone ID: {zone_id}")
@@ -95,7 +93,6 @@ def get_preferred_ips():
             response = requests.get(IP_API_URL, timeout=10)
             response.raise_for_status()
             lines = response.text.strip().split('\n')
-            # 过滤掉注释和空行
             valid_ips = [line.split('#')[0].strip() for line in lines if line.strip() and not line.startswith('#')]
 
             if not valid_ips:
@@ -121,44 +118,30 @@ def get_preferred_ips():
                 return []
     return []
 
-# 关键修改点: 不再按 name 或 type 筛选，获取 Zone 内所有记录
-def get_all_records_in_zone():
-    """获取当前 Zone 内的所有记录 (处理分页)"""
-    print(f"正在查询 Zone ID '{zone_id}' 内的所有 DNS 记录...")
-    all_records = []
-    marker = None
-    limit = 100  # 每次请求获取100条记录
-    
-    while True:
-        try:
-            request = ListRecordSetsByZoneRequest(zone_id=zone_id)
-            request.limit = limit
-            if marker:
-                request.marker = marker
-            
-            response = dns_client.list_record_sets_by_zone(request)
-            
-            if response.recordsets:
-                all_records.extend(response.recordsets)
-            
-            # 检查是否有下一页
-            if response.links and response.links.next:
-                next_link = response.links.next
-                marker_param = "marker="
-                if marker_param in next_link:
-                    marker = next_link.split(marker_param)[1].split('&')[0]
-                else:
-                    break 
-            else:
-                break
-                
-        except exceptions.ClientRequestException as e:
-            print(f"错误: 查询 DNS 记录时发生错误: {e}")
-            return [] 
-
-    print(f"通过分页查询，总共找到 {len(all_records)} 条 DNS 记录。")
-    return all_records
-
+# 最终修复: 使用专门的线路查询接口 ListRecordSetsWithLineRequest
+def get_existing_records_for_line(line_code):
+    """获取指定线路下，当前域名的 A 记录"""
+    print(f"正在使用线路接口查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 A 记录...")
+    try:
+        # 使用支持线路查询的请求
+        request = ListRecordSetsWithLineRequest(
+            zone_id=zone_id,
+            name=DOMAIN_NAME + ".",
+            type="A",
+            line_id=line_code # 直接通过 API 按线路筛选
+        )
+        
+        # 这个接口不支持分页，会一次性返回所有匹配的记录
+        response = dns_client.list_record_sets_with_line(request)
+        
+        if response.recordsets:
+            print(f"查询到 {len(response.recordsets)} 条属于线路 '{line_code}' 的记录。")
+            return response.recordsets
+        else:
+            return []
+    except exceptions.ClientRequestException as e:
+        print(f"错误: 查询线路 DNS 记录时发生错误: {e}")
+        return []
 
 def delete_dns_record(record_id):
     """删除指定的 DNS 记录"""
@@ -215,37 +198,12 @@ def main():
         print("未能获取新的 IP 地址，本次任务终止。")
         return
 
-    # 1. 获取 Zone 内的所有记录
-    all_records_in_zone = get_all_records_in_zone()
-    if not all_records_in_zone:
-        print("未能获取到任何 DNS 记录，将直接尝试创建。")
-    else:
-        # --- 增加详细日志 ---
-        print("--- 打印从 API 获取到的所有记录详情 ---")
-        for i, record in enumerate(all_records_in_zone):
-            print(f"  记录 #{i+1}:")
-            print(f"    ID: {getattr(record, 'id', 'N/A')}")
-            print(f"    Name: {getattr(record, 'name', 'N/A')}")
-            print(f"    Type: {getattr(record, 'type', 'N/A')}")
-            print(f"    Line: {getattr(record, 'line', 'N/A')}")
-            print(f"    Records: {getattr(record, 'records', 'N/A')}")
-        print("--- 详细日志结束 ---")
-
-    # 2. 在脚本内筛选出与目标域名相关的 A 记录
-    target_name = DOMAIN_NAME + "."
-    relevant_a_records = [
-        record for record in all_records_in_zone 
-        if hasattr(record, 'name') and record.name == target_name and hasattr(record, 'type') and record.type == "A"
-    ]
-    print(f"在所有记录中，筛选出 {len(relevant_a_records)} 条与 {DOMAIN_NAME} 相关的 A 记录。")
-
-
-    # 3. 遍历所有定义的运营商线路
+    # 遍历所有定义的运营商线路
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
-        # 从已筛选的相关记录中，再次筛选出属于当前线路的记录并删除
-        records_to_delete = [record for record in relevant_a_records if hasattr(record, 'line') and record.line == line_code]
+        # 1. 直接查询当前线路下的旧记录
+        records_to_delete = get_existing_records_for_line(line_code)
         
         if records_to_delete:
             print(f"--- 发现 {len(records_to_delete)} 条属于线路 '{line_name}' 的旧记录，开始删除 ---")
@@ -254,7 +212,7 @@ def main():
         else:
             print(f"线路 '{line_name}' 没有需要删除的旧记录。")
 
-        # 在该线路下创建新的记录集
+        # 2. 在该线路下创建新的记录集
         print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
         create_dns_record_set(new_ips, line_code)
     
