@@ -118,20 +118,18 @@ def get_preferred_ips():
                 return []
     return []
 
-# 最终修复: 使用专门的线路查询接口 ListRecordSetsWithLineRequest
+# 最终修复: 修正 SDK 调用语法
 def get_existing_records_for_line(line_code):
     """获取指定线路下，当前域名的 A 记录"""
     print(f"正在使用线路接口查询域名 {DOMAIN_NAME} (线路: {line_code}) 的现有 A 记录...")
     try:
-        # 使用支持线路查询的请求
-        request = ListRecordSetsWithLineRequest(
-            zone_id=zone_id,
-            name=DOMAIN_NAME + ".",
-            type="A",
-            line_id=line_code # 直接通过 API 按线路筛选
-        )
+        # 修正 SDK 调用方式：先创建对象，再设置属性
+        request = ListRecordSetsWithLineRequest()
+        request.zone_id = zone_id
+        request.name = DOMAIN_NAME + "."
+        request.type = "A"
+        request.line_id = line_code
         
-        # 这个接口不支持分页，会一次性返回所有匹配的记录
         response = dns_client.list_record_sets_with_line(request)
         
         if response.recordsets:
@@ -146,7 +144,10 @@ def get_existing_records_for_line(line_code):
 def delete_dns_record(record_id):
     """删除指定的 DNS 记录"""
     try:
-        request = DeleteRecordSetRequest(zone_id=zone_id, recordset_id=record_id)
+        # 修正 SDK 调用方式：先创建对象，再设置属性
+        request = DeleteRecordSetRequest()
+        request.zone_id = zone_id
+        request.recordset_id = record_id
         dns_client.delete_record_set(request)
         print(f"成功删除记录: {record_id}")
         return True
@@ -170,7 +171,10 @@ def create_dns_record_set(ip_list, line_code):
             line=line_code
         )
         
-        request = CreateRecordSetWithLineRequest(zone_id=zone_id, body=body)
+        # 修正 SDK 调用方式：先创建对象，再设置属性
+        request = CreateRecordSetWithLineRequest()
+        request.zone_id = zone_id
+        request.body = body
         dns_client.create_record_set_with_line(request)
 
         print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
