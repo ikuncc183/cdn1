@@ -26,7 +26,7 @@ DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 MAX_IPS = os.environ.get('MAX_IPS')
 
 # --- 优选 IP 的 API 地址 ---
-IP_API_URL = 'https://ipdb.api.030101.xyz/?type=bestcf&country=true'
+IP_API_URL = 'https://raw.githubusercontent.com/hubbylei/bestcf/main/bestcf.txt'
 
 # --- 定义运营商线路 ---
 # 核心修改点：将线路代码更新为华为云普遍接受的拼音格式
