@@ -134,47 +134,38 @@ def get_existing_records_for_line(line_code):
             print(f"查询到 {len(response.recordsets)} 条属于线路 '{line_code}' 的记录。")
             return response.recordsets
         else:
+            print(f"线路 '{line_code}' 下没有已存在的 A 记录。")
             return []
     except exceptions.ClientRequestException as e:
         print(f"错误: 查询线路 DNS 记录时发生错误: {e}")
         return []
 
-def delete_dns_record(record_id):
-    """删除指定的 DNS 记录 (增加验证步骤)"""
-    # 步骤 1: 验证记录是否存在
+def update_dns_record_set(record_id, ip_list):
+    """更新指定的 DNS 记录集"""
+    print(f"准备将记录 {record_id} 的 IP 更新为新的列表...")
     try:
-        print(f"  > 正在验证记录 {record_id} 是否存在...")
-        show_request = ShowRecordSetRequest()
-        show_request.zone_id = zone_id
-        show_request.recordset_id = record_id
-        dns_client.show_record_set(show_request)
-        print(f"  > 验证成功，记录 {record_id} 存在。")
-    except exceptions.ClientRequestException as e:
-        # 如果连查询都失败，且错误是 "not exist"，说明 ID 确实有问题
-        print(f"  > 验证失败: 无法获取记录 {record_id}。API 错误: {e.error_msg}")
-        print(f"  > 跳过删除此条记录。")
-        return True # 返回 True 以免阻塞流程
-
-    # 步骤 2: 执行删除
-    try:
-        print(f"  > 正在删除记录 {record_id} ...")
-        delete_request = DeleteRecordSetRequest()
-        delete_request.zone_id = zone_id
-        delete_request.recordset_id = record_id
-        dns_client.delete_record_set(delete_request)
-        print(f"  > 成功删除记录: {record_id}")
+        # 更新记录只需要提供 TTL 和 IP 列表
+        body = UpdateRecordSetReq(
+            ttl=60,
+            records=ip_list
+        )
+        request = UpdateRecordSetRequest()
+        request.zone_id = zone_id
+        request.recordset_id = record_id
+        request.body = body
+        
+        dns_client.update_record_set(request)
+        print(f"成功更新记录 {record_id}。")
         return True
     except exceptions.ClientRequestException as e:
-        print(f"  > 错误: 删除记录 {record_id} 时失败: {e.error_msg}")
+        print(f"错误: 更新记录 {record_id} 时失败: {e}")
+        if hasattr(e, 'error_msg'):
+            print(f"API 返回信息: {e.error_msg}")
         return False
 
 def create_dns_record_set(ip_list, line_code):
-    """将所有 IP 创建到指定线路的一个解析记录集中"""
-    if not ip_list:
-        print("IP 列表为空，无需创建记录。")
-        return False
-        
-    print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个解析记录集中...")
+    """创建新的 DNS 记录集"""
+    print(f"准备将 {len(ip_list)} 个 IP 创建到线路 '{line_code}' 的一个新解析记录集中...")
     try:
         body = CreateRecordSetWithLineRequestBody(
             name=DOMAIN_NAME + ".", 
@@ -189,7 +180,7 @@ def create_dns_record_set(ip_list, line_code):
         request.body = body
         dns_client.create_record_set_with_line(request)
 
-        print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
+        print(f"成功为 {DOMAIN_NAME} (线路: {line_code}) 创建了新的 A 记录。")
         return True
     except exceptions.ClientRequestException as e:
         print(f"错误: 创建解析记录集时失败: {e}")
@@ -218,20 +209,22 @@ def main():
     for line_name, line_code in ISP_LINES.items():
         print(f"\n--- 正在处理线路: {line_name} ({line_code}) ---")
 
-        # 1. 直接查询当前线路下的旧记录
-        records_to_delete = get_existing_records_for_line(line_code)
+        # 1. 查询当前线路下的旧记录
+        existing_records = get_existing_records_for_line(line_code)
         
-        if records_to_delete:
-            print(f"--- 发现 {len(records_to_delete)} 条属于线路 '{line_name}' 的旧记录，开始删除 ---")
-            for record in records_to_delete:
-                delete_dns_record(record.id)
-                time.sleep(1) # 在每次删除操作后增加1秒延迟，防止API频率问题
+        if existing_records:
+            # 如果存在记录，则更新第一条记录
+            # 华为云似乎会为同一线路创建多个 recordset，我们只更新第一个，其他的可以手动清理
+            record_to_update = existing_records[0]
+            print(f"--- 发现旧记录，将更新记录 ID: {record_to_update.id} ---")
+            update_dns_record_set(record_to_update.id, new_ips)
         else:
-            print(f"线路 '{line_name}' 没有需要删除的旧记录。")
-
-        # 2. 在该线路下创建新的记录集
-        print(f"--- 开始为线路 '{line_name}' 创建新的 DNS 记录 ---")
-        create_dns_record_set(new_ips, line_code)
+            # 如果不存在记录，则创建新记录
+            print(f"--- 未发现旧记录，将创建新记录 ---")
+            create_dns_record_set(new_ips, line_code)
+        
+        # 增加延迟，避免API调用过于频繁
+        time.sleep(2)
     
     print("\n--- 所有线路更新完成 ---")
 
