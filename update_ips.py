@@ -26,9 +26,9 @@ MAX_IPS = os.environ.get('MAX_IPS')
 
 # --- 优选 IP 的 API 地址 (按线路分别设置) ---
 IP_API_URLS = {
-    "Yidong": os.environ.get('https://ipdb.api.030101.xyz/?type=bestcf&country=true'),    # 移动线路 API
-    "Dianxin": os.environ.get('https://addressesapi.090227.xyz/ip.164746.xyz'), # 电信线路 API
-    "Liantong": os.environ.get('https://addressesapi.090227.xyz/CloudFlareYes') # 联通线路 API
+    "Yidong": os.environ.get('I_URL_YIDONG'),    # 移动线路 API
+    "Dianxin": os.environ.get('IP_API_URL_DIANXIN'), # 电信线路 API
+    "Liantong": os.environ.get('IP_API_URL_LIANTONG') # 联通线路 API
 }
 
 # --- 定义运营商线路 ---
