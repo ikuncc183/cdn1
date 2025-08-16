@@ -24,11 +24,11 @@ DOMAIN_NAME = os.environ.get('DOMAIN_NAME')
 # (可选) 需要解析的IP数量
 MAX_IPS = os.environ.get('MAX_IPS')
 
-# --- 优选 IP 的 API 地址 (按线路分别设置) ---
+# --- 优选 IP 的 API 地址 (请直接在此处修改) ---
 IP_API_URLS = {
-    "Yidong": os.environ.get('I_URL_YIDONG'),    # 移动线路 API
-    "Dianxin": os.environ.get('IP_API_URL_DIANXIN'), # 电信线路 API
-    "Liantong": os.environ.get('IP_API_URL_LIANTONG') # 联通线路 API
+    "Yidong": "https://ipdb.api.030101.xyz/?type=bestcf&country=true",    # 移动线路 API
+    "Dianxin": "https://addressesapi.090227.xyz/CloudFlareYes", # 电信线路 API
+    "Liantong": "https://addressesapi.090227.xyz/ip.164746.xyz" # 联通线路 API
 }
 
 # --- 定义运营商线路 ---
@@ -88,6 +88,11 @@ def get_zone_id():
 
 def get_preferred_ips(api_url):
     """从指定的 API 获取优选 IP 列表"""
+    # 检查URL是否还是占位符
+    if "请在这里填入" in api_url:
+        print(f"错误: API 地址尚未配置: {api_url}")
+        return []
+
     print(f"正在从 {api_url} 获取优选 IP...")
     retry_count = 3
     retry_delay = 10
@@ -210,7 +215,7 @@ def main():
         # 获取当前线路对应的 API URL
         current_api_url = IP_API_URLS.get(line_code)
         if not current_api_url:
-            print(f"警告: 未为线路 '{line_name}' ({line_code}) 配置 API URL。请设置环境变量 IP_API_URL_{line_code.upper()}。跳过此线路。")
+            print(f"警告: 未为线路 '{line_name}' ({line_code}) 配置 API URL。跳过此线路。")
             continue
 
         # 为当前线路获取新的 IP 列表
